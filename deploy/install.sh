@@ -23,7 +23,7 @@ die() { printf '\nERROR: %s\n' "$1" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run as root"
 
 # --- deploy key ------------------------------------------------------------
-if [[ "$REPO" == git@* ]]; then
+if [[ "$REPO" == git@* ]] && [ "${SKIP_FETCH:-0}" != "1" ]; then
   say "GitHub deploy key"
   mkdir -p /root/.ssh && chmod 700 /root/.ssh
 
@@ -70,16 +70,23 @@ say "service user"
 id -u mnf >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin mnf
 
 # --- source ----------------------------------------------------------------
-say "source"
-if [ -d "$APP/.git" ]; then
+# SKIP_FETCH=1 means the source has already been placed in $APP by the caller
+# (the GitHub Actions deploy copies it in over SSH), so no clone or deploy key
+# is needed on the server.
+if [ "${SKIP_FETCH:-0}" = "1" ]; then
+  say "source (supplied by caller)"
+  [ -d "$APP/web" ] || die "SKIP_FETCH=1 but $APP/web is missing"
+elif [ -d "$APP/.git" ]; then
+  say "source"
   git -C "$APP" remote set-url origin "$REPO"
   git -C "$APP" fetch --depth 1 origin main
   git -C "$APP" reset --hard origin/main
 else
+  say "source"
   [ -e "$APP" ] && die "$APP exists but is not a git clone — move it aside first"
   git clone --depth 1 "$REPO" "$APP"
 fi
-git -C "$APP" --no-pager log --oneline -1
+git -C "$APP" --no-pager log --oneline -1 2>/dev/null || true
 
 # --- build -----------------------------------------------------------------
 say "build"

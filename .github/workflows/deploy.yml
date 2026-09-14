@@ -1,0 +1,98 @@
+name: Deploy to VPS
+
+# Manual trigger, or automatically when main changes.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'deploy/**'
+      - '.github/workflows/deploy.yml'
+
+# Least privilege: the job only needs to read the repository.
+permissions:
+  contents: read
+
+# Never let two deploys touch the server at once.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  VPS_HOST: srv1936995.hstgr.cloud
+  VPS_USER: root
+  APP_DIR: /srv/mynewsfactory
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Verify the app builds before touching the server
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::Secret VPS_SSH_KEY is not set. Add the private key that matches the public key registered on the VPS."
+            exit 1
+          fi
+          if [ -z "$KNOWN_HOSTS" ]; then
+            echo "::error::Secret VPS_KNOWN_HOSTS is not set. Generate it with: ssh-keyscan -t ed25519 ${VPS_HOST}"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned host key — never StrictHostKeyChecking=no.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Copy the source to the server
+        run: |
+          # Ship the tree without git metadata, dependencies or build output;
+          # the server installs and builds from a clean state.
+          tar --exclude='.git' \
+              --exclude='node_modules' \
+              --exclude='web/.next' \
+              -czf /tmp/app.tar.gz .
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
+            "mkdir -p '${APP_DIR}'"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes /tmp/app.tar.gz \
+            "${VPS_USER}@${VPS_HOST}:/tmp/app.tar.gz"
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
+            "tar -xzf /tmp/app.tar.gz -C '${APP_DIR}' && rm -f /tmp/app.tar.gz"
+
+      - name: Run the installer on the server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
+            "SKIP_FETCH=1 bash '${APP_DIR}/deploy/install.sh'"
+
+      - name: Verify the site is serving
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" '
+            set -e
+            systemctl is-active --quiet mynewsfactory || { echo "service not active"; exit 1; }
+            app=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:3000)
+            web=$(curl -sS -o /dev/null -w "%{http_code}" -H "Host: mynewsfactory.com" http://127.0.0.1)
+            echo "app  -> $app"
+            echo "site -> $web"
+            [ "$app" = "200" ] && [ "$web" = "200" ]
+          '
+
+      - name: Remove the SSH key from the runner
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
