@@ -1,0 +1,52 @@
+# /etc/systemd/system/mynewsfactory.service
+#
+# Runs the Next.js portal as an unprivileged user, bound to loopback only.
+# nginx is the sole public listener and proxies to it.
+
+[Unit]
+Description=My News Factory portal (Next.js)
+Documentation=https://github.com/wowkismet/mynewsfactory.com
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mnf
+Group=mnf
+WorkingDirectory=/srv/mynewsfactory/web
+
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p 3000 -H 127.0.0.1
+
+Restart=on-failure
+RestartSec=5s
+
+# --- hardening ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+
+# Next writes its build cache here at runtime.
+ReadWritePaths=/srv/mynewsfactory/web/.next
+
+[Install]
+WantedBy=multi-user.target
