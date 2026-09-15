@@ -135,6 +135,22 @@ chown -R mnf:mnf "$APP"
 say "service"
 install -m 0644 "$APP/deploy/mynewsfactory.service" "/etc/systemd/system/$SVC.service"
 systemctl daemon-reload
+
+# A previous run killed mid-deploy can leave an orphaned node holding :3000,
+# which makes every subsequent start fail with EADDRINUSE and sends systemd
+# into a restart loop. Stop the unit, clear any process still on the port, and
+# reset the failure counter before starting.
+systemctl stop "$SVC" 2>/dev/null || true
+PORT_PIDS=$(ss -tlnpH "sport = :3000" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u)
+if [ -n "$PORT_PIDS" ]; then
+  echo "port 3000 held by pid(s): $PORT_PIDS — stopping them"
+  # shellcheck disable=SC2086
+  kill $PORT_PIDS 2>/dev/null || true
+  sleep 2
+  # shellcheck disable=SC2086
+  kill -9 $PORT_PIDS 2>/dev/null || true
+fi
+systemctl reset-failed "$SVC" 2>/dev/null || true
 systemctl enable --now "$SVC"
 sleep 3
 systemctl is-active --quiet "$SVC" || { journalctl -u "$SVC" -n 40 --no-pager; die "service failed to start"; }
