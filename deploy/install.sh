@@ -17,8 +17,10 @@ SVC=mynewsfactory
 KEY=/root/.ssh/mnf_deploy
 NODE_MAJOR=22
 
+LOG=/var/log/mnf-deploy.log
+exec > >(tee -a "$LOG") 2>&1
 say() { printf '\n==> %s\n' "$1"; }
-die() { printf '\nERROR: %s\n' "$1" >&2; exit 1; }
+die() { printf '\nERROR: %s\n\nFull log: %s\n' "$1" "${LOG:-/var/log/mnf-deploy.log}" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
 
@@ -57,6 +59,27 @@ MSG
   echo "deploy key authenticates to GitHub"
 fi
 
+# --- memory ----------------------------------------------------------------
+# Next.js builds need roughly 2 GB. Small VPS plans OOM-kill the build with no
+# useful error, so add swap when total memory + swap is short.
+say "memory"
+TOTAL_MB=$(free -m | awk '/^Mem:/{print $2}')
+SWAP_MB=$(free -m | awk '/^Swap:/{print $2}')
+echo "RAM ${TOTAL_MB}MB, swap ${SWAP_MB}MB"
+if [ $((TOTAL_MB + SWAP_MB)) -lt 2400 ]; then
+  if [ ! -f /swapfile ]; then
+    echo "adding a 2G swapfile so the build does not get OOM-killed"
+    fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else
+    swapon /swapfile 2>/dev/null || true
+  fi
+  free -m | awk '/^Swap:/{print "swap now " $2 "MB"}'
+fi
+
 # --- node ------------------------------------------------------------------
 say "Node.js"
 if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
@@ -92,7 +115,13 @@ git -C "$APP" --no-pager log --oneline -1 2>/dev/null || true
 say "build"
 cd "$APP/web"
 npm ci
-npm run build
+# Bound the heap so the kernel does not kill node outright.
+if ! NODE_OPTIONS="--max-old-space-size=1536" npm run build; then
+  echo
+  echo "The build failed. If the last thing you see is 'Killed' or the log stops"
+  echo "abruptly, the server ran out of memory. Check with: dmesg | tail -20"
+  die "next build failed"
+fi
 chown -R mnf:mnf "$APP"
 
 # --- service ---------------------------------------------------------------
