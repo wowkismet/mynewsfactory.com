@@ -136,20 +136,27 @@ say "service"
 install -m 0644 "$APP/deploy/mynewsfactory.service" "/etc/systemd/system/$SVC.service"
 systemctl daemon-reload
 
-# A previous run killed mid-deploy can leave an orphaned node holding :3000,
+# A previous run killed mid-deploy can leave an orphaned node holding :3100,
 # which makes every subsequent start fail with EADDRINUSE and sends systemd
 # into a restart loop. Stop the unit, clear any process still on the port, and
 # reset the failure counter before starting.
 systemctl stop "$SVC" 2>/dev/null || true
-PORT_PIDS=$(ss -tlnpH "sport = :3000" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u)
-if [ -n "$PORT_PIDS" ]; then
-  echo "port 3000 held by pid(s): $PORT_PIDS — stopping them"
-  # shellcheck disable=SC2086
-  kill $PORT_PIDS 2>/dev/null || true
-  sleep 2
-  # shellcheck disable=SC2086
-  kill -9 $PORT_PIDS 2>/dev/null || true
-fi
+
+# Only ever reclaim the port from our own unit. Another service may legitimately
+# own it — this host also runs rareminting.com on 3000 — and killing a stranger's
+# process takes someone else's site down.
+PORT_PIDS=$(ss -tlnpH "sport = :3100" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u)
+for pid in $PORT_PIDS; do
+  owner=$(ps -o unit= -p "$pid" 2>/dev/null | tr -d ' ')
+  if [ "$owner" = "$SVC.service" ]; then
+    echo "port 3100 held by our own stopped unit (pid $pid) — clearing"
+    kill "$pid" 2>/dev/null || true
+    sleep 2
+    kill -9 "$pid" 2>/dev/null || true
+  else
+    die "port 3100 is in use by pid $pid (${owner:-unknown service}). Refusing to kill a process this installer does not own. Set a different port in deploy/mynewsfactory.service and deploy/nginx-mynewsfactory.conf, or stop that service yourself."
+  fi
+done
 systemctl reset-failed "$SVC" 2>/dev/null || true
 systemctl enable --now "$SVC"
 sleep 3
@@ -168,11 +175,11 @@ systemctl restart nginx
 
 # --- verify ----------------------------------------------------------------
 say "verify"
-APP_CODE=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3000 || true)
+APP_CODE=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3100 || true)
 WEB_CODE=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: mynewsfactory.com' http://127.0.0.1 || true)
-printf 'app  127.0.0.1:3000            -> %s\n' "$APP_CODE"
+printf 'app  127.0.0.1:3100            -> %s\n' "$APP_CODE"
 printf 'site via nginx (Host header)   -> %s\n' "$WEB_CODE"
-[ "$APP_CODE" = "200" ] || die "the app is not responding on port 3000"
+[ "$APP_CODE" = "200" ] || die "the app is not responding on port 3100"
 [ "$WEB_CODE" = "200" ] || die "nginx is not proxying to the app"
 
 cat <<'DONE'
