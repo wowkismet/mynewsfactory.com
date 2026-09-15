@@ -1,0 +1,35 @@
+# My News Factory portal.
+#
+# The container listens on 3000 internally but is published only on the host's
+# loopback at 3100, so it cannot collide with anything else on this machine —
+# rareminting.com runs on 3000 and must stay untouched.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mynewsfactory:latest
+    container_name: mynewsfactory
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:3100:3000"
+
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    # --- hardening ---
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

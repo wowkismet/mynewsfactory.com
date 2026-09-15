@@ -27,6 +27,9 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Emits .next/standalone with a self-contained server.js, so the runtime
+  // image carries only the files the server actually needs.
+  output: 'standalone',
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }]
   },
