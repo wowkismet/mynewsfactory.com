@@ -4,14 +4,14 @@
 #
 #   sudo bash deploy/install.sh
 #
-# The repository is private, so the clone uses a read-only GitHub deploy key.
-# Run with no key present and the script generates one, prints it and stops
-# with instructions — rerun once the key is registered on the repository.
+# Clones over HTTPS by default. If the source is already present at the target
+# path it is used as-is, so no GitHub credentials are needed at all. Only when
+# REPO is overridden with an ssh:// form does the script set up a deploy key.
 #
 # Override the source with:  REPO=... bash deploy/install.sh
 set -euo pipefail
 
-REPO="${REPO:-git@github.com:wowkismet/mynewsfactory.com.git}"
+REPO="${REPO:-https://github.com/wowkismet/mynewsfactory.com}"
 APP=/srv/mynewsfactory
 SVC=mynewsfactory
 KEY=/root/.ssh/mnf_deploy
@@ -23,6 +23,13 @@ say() { printf '\n==> %s\n' "$1"; }
 die() { printf '\nERROR: %s\n\nFull log: %s\n' "$1" "${LOG:-/var/log/mnf-deploy.log}" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
+
+# Source already present (cloned by hand, or shipped in by CI): skip fetching
+# entirely, which also means no GitHub credentials are needed.
+if [ -d "$APP/web" ] && [ "${SKIP_FETCH:-0}" != "1" ]; then
+  echo "source already present at $APP — skipping fetch"
+  SKIP_FETCH=1
+fi
 
 # --- deploy key ------------------------------------------------------------
 if [[ "$REPO" == git@* ]] && [ "${SKIP_FETCH:-0}" != "1" ]; then
