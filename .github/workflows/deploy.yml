@@ -1,16 +1,18 @@
 name: Deploy to VPS
 
-# Manual trigger, or automatically when main changes.
+# Rebuilds the Docker container on the VPS. Manual, or automatically when
+# anything that affects the running image changes on main.
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - 'web/**'
-      - 'deploy/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
       - '.github/workflows/deploy.yml'
 
-# Least privilege: the job only needs to read the repository.
+# Least privilege: the job only reads the repository.
 permissions:
   contents: read
 
@@ -23,18 +25,21 @@ env:
   VPS_HOST: srv1936995.hstgr.cloud
   VPS_USER: root
   APP_DIR: /srv/mynewsfactory
+  APP_PORT: '3100'
 
 jobs:
   deploy:
-    name: Build and deploy
+    name: Build, deploy, verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Check out the repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: Verify the app builds before touching the server
+      # Fail here rather than on the server: a broken build should never reach
+      # the VPS, where a failed `docker compose up` can leave the site down.
+      - name: Verify the app builds
         working-directory: web
         run: |
           npm ci
@@ -47,51 +52,79 @@ jobs:
           KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           if [ -z "$SSH_KEY" ]; then
-            echo "::error::Secret VPS_SSH_KEY is not set. Add the private key that matches the public key registered on the VPS."
+            echo "::error::Secret VPS_SSH_KEY is not set. Add the private key whose public half is in /root/.ssh/authorized_keys on the VPS."
             exit 1
           fi
           if [ -z "$KNOWN_HOSTS" ]; then
-            echo "::error::Secret VPS_KNOWN_HOSTS is not set. Generate it with: ssh-keyscan -t ed25519 ${VPS_HOST}"
+            echo "::error::Secret VPS_KNOWN_HOSTS is not set. Generate it on the VPS with: ssh-keyscan -t ed25519 ${VPS_HOST}"
             exit 1
           fi
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # Pinned host key — never StrictHostKeyChecking=no.
+          # Host identity is pinned. Never StrictHostKeyChecking=no.
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Copy the source to the server
+      # rareminting.com shares this server on port 3000. Record its health now
+      # so the final step can prove the deploy did not disturb it.
+      - name: Record rareminting health before deploying
+        id: before
         run: |
-          # Ship the tree without git metadata, dependencies or build output;
-          # the server installs and builds from a clean state.
-          tar --exclude='.git' \
-              --exclude='node_modules' \
-              --exclude='web/.next' \
-              -czf /tmp/app.tar.gz .
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
-            "mkdir -p '${APP_DIR}'"
-          scp -i ~/.ssh/deploy_key -o BatchMode=yes /tmp/app.tar.gz \
-            "${VPS_USER}@${VPS_HOST}:/tmp/app.tar.gz"
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
-            "tar -xzf /tmp/app.tar.gz -C '${APP_DIR}' && rm -f /tmp/app.tar.gz"
+          code=$(ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
+            "curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: rareminting.com' http://127.0.0.1 || echo 000")
+          echo "rareminting before: $code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
-      - name: Run the installer on the server
+      - name: Pull and rebuild the container
         run: |
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
-            "SKIP_FETCH=1 bash '${APP_DIR}/deploy/install.sh'"
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" bash -s <<'REMOTE'
+            set -euo pipefail
+            cd /srv/mynewsfactory
+            git fetch --depth 1 origin main
+            git reset --hard origin/main
+            git --no-pager log --oneline -1
+            # Only this project's compose stack is touched; nothing else on the
+            # host is stopped, and the container publishes 127.0.0.1:3100 only.
+            docker compose up -d --build
+            # Keep the disk from filling with superseded layers.
+            docker image prune -f >/dev/null 2>&1 || true
+          REMOTE
 
-      - name: Verify the site is serving
+      - name: Verify the deploy
         run: |
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" '
-            set -e
-            systemctl is-active --quiet mynewsfactory || { echo "service not active"; exit 1; }
-            app=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:3000)
-            web=$(curl -sS -o /dev/null -w "%{http_code}" -H "Host: mynewsfactory.com" http://127.0.0.1)
-            echo "app  -> $app"
-            echo "site -> $web"
-            [ "$app" = "200" ] && [ "$web" = "200" ]
-          '
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" bash -s <<'REMOTE'
+            set -euo pipefail
+
+            # Give the container a moment to finish starting.
+            for i in $(seq 1 20); do
+              app=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3100 || echo 000)
+              [ "$app" = "200" ] && break
+              sleep 3
+            done
+
+            site=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: mynewsfactory.com' http://127.0.0.1 || echo 000)
+
+            echo "container 127.0.0.1:3100 -> $app"
+            echo "site via nginx          -> $site"
+
+            docker compose -f /srv/mynewsfactory/docker-compose.yml ps
+
+            [ "$app" = "200" ]  || { echo "the container is not serving"; exit 1; }
+            [ "$site" = "200" ] || { echo "nginx is not proxying to the container"; exit 1; }
+          REMOTE
+
+      # A deploy that silently breaks the neighbouring site is a failed deploy.
+      - name: Confirm rareminting is unaffected
+        run: |
+          after=$(ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
+            "curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: rareminting.com' http://127.0.0.1 || echo 000")
+          before='${{ steps.before.outputs.code }}'
+          echo "rareminting before=$before after=$after"
+          if [ "$before" = "200" ] && [ "$after" != "200" ]; then
+            echo "::error::rareminting.com was healthy before this deploy and is not now. Investigate immediately."
+            exit 1
+          fi
 
       - name: Remove the SSH key from the runner
         if: always()
