@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Diagnose and repair mynewsfactory.com serving on this host.
+# Repair mynewsfactory.com serving on this host.
+#
+# Root cause this fixes: the mynewsfactory vhost proxies to 127.0.0.1:3000,
+# which is rareminting's app. nginx matches the server_name correctly and then
+# hands the request to the wrong upstream, so the domain shows the other site.
 #
 # Safety rules this script obeys:
-#   - It never edits, reloads over, or kills anything belonging to rareminting.
-#   - It backs up the whole of /etc/nginx before any change.
-#   - It only adds nginx config; it never rewrites an existing site file except
-#     to correct a proxy_pass port inside a file that mentions mynewsfactory.com
-#     and does not mention rareminting.
-#   - If "nginx -t" fails after a change, the backup is restored and nginx is
-#     left exactly as it was.
+#   - The proxy_pass rewrite is scoped to individual server blocks whose
+#     server_name mentions mynewsfactory and which do not mention rareminting.
+#     A block belonging to rareminting is never touched, even in a shared file.
+#   - /etc/nginx is backed up before any change, and restored if nginx -t fails.
+#   - No process is killed and no unit outside this project is touched.
 
 set -u
 
@@ -17,97 +19,113 @@ step() { printf '\n%s== %s ==%s\n' "$YEL" "$*" "$OFF"; }
 ok()   { printf '%s  ok%s  %s\n' "$GRN" "$OFF" "$*"; }
 bad()  { printf '%s  !!%s  %s\n' "$RED" "$OFF" "$*"; }
 
-if [ "$(id -u)" -ne 0 ]; then
-  bad "run this as root (sudo bash $0)"
-  exit 1
-fi
+[ "$(id -u)" -eq 0 ] || { bad "run as root: sudo bash $0"; exit 1; }
 
 APP=/srv/mynewsfactory
 PORT=3100
 CHANGED=0
 
 # ---------------------------------------------------------------- 1. container
-step "1. container state"
-docker ps -a --format '{{.Names}} | {{.Status}} | {{.Ports}}' 2>/dev/null || bad "docker not responding"
+step "1. container"
+docker ps -a --format '{{.Names}} | {{.Status}} | {{.Ports}}' 2>/dev/null | sed 's/^/   /'
 
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx mynewsfactory; then
-  ok "container mynewsfactory is running"
+  ok "mynewsfactory is running"
 else
-  bad "container mynewsfactory is NOT running - starting it"
-  if [ -d "$APP" ]; then
-    ( cd "$APP" && docker compose up -d --build ) || bad "docker compose failed - read the output above"
-  else
-    bad "$APP does not exist; cannot start the container"
-  fi
+  bad "mynewsfactory is not running - starting it"
+  [ -d "$APP" ] && ( cd "$APP" && docker compose up -d --build ) || bad "could not start it"
 fi
 
-# ------------------------------------------------------------------- 2. the app
 step "2. app on 127.0.0.1:$PORT"
-APP_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$PORT" 2>/dev/null)
-if [ "$APP_CODE" = "200" ]; then
+CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$PORT" 2>/dev/null)
+if [ "$CODE" = "200" ]; then
   ok "127.0.0.1:$PORT -> 200"
 else
-  bad "127.0.0.1:$PORT -> ${APP_CODE:-no answer}  (nginx has nothing to proxy to)"
-  docker logs --tail 30 mynewsfactory 2>&1 | sed 's/^/      /' || true
+  bad "127.0.0.1:$PORT -> ${CODE:-no answer}"
+  docker logs --tail 25 mynewsfactory 2>&1 | sed 's/^/      /' || true
 fi
 
 # ------------------------------------------------------------------ 3. backup
-step "3. backing up nginx"
+step "3. backup"
 BACKUP=/root/nginx-backup-$(date +%Y%m%d-%H%M%S)
-cp -a /etc/nginx "$BACKUP" && ok "saved to $BACKUP"
+cp -a /etc/nginx "$BACKUP" && ok "saved $BACKUP"
 
 restore() {
-  bad "restoring nginx from $BACKUP"
+  bad "restoring $BACKUP"
   rm -rf /etc/nginx && cp -a "$BACKUP" /etc/nginx
   nginx -t && systemctl reload nginx
 }
 
-# ------------------------------------------------------------------- 4. vhost
-step "4. mynewsfactory vhost"
-VH=""
-for f in /etc/nginx/sites-enabled/*; do
-  [ -f "$f" ] || continue
-  if grep -q 'mynewsfactory\.com' "$f" && ! grep -qi 'rareminting' "$f"; then
-    VH=$(readlink -f "$f"); break
-  fi
-done
+# ------------------------------------------------- 4. correct the upstream port
+# Rewrites 127.0.0.1:3000 -> 127.0.0.1:PORT, but only inside a server block that
+# mentions mynewsfactory and does not mention rareminting. Blocks are buffered
+# whole and matched individually, so a file holding both sites is handled safely.
+step "4. upstream port in the mynewsfactory server block"
 
-if [ -z "$VH" ]; then
-  bad "no enabled vhost mentions mynewsfactory.com - nothing routes the domain"
-else
-  ok "vhost: $VH"
-  if grep -q 'listen.*443' "$VH"; then
-    ok "vhost has a 443 block"
+rewrite_blocks() {
+  awk -v want="$PORT" '
+    function flush() {
+      if (buf != "") {
+        if (buf ~ /mynewsfactory/ && buf !~ /rareminting/) {
+          n = gsub(/127\.0\.0\.1:3000/, "127.0.0.1:" want, buf)
+          if (n > 0) hits += n
+        }
+        printf "%s", buf
+        buf = ""
+      }
+    }
+    {
+      op = $0; nopen  = gsub(/\{/, "{", op)
+      cl = $0; nclose = gsub(/\}/, "}", cl)
+
+      if (!inblk && depth == 0 && $0 ~ /^[[:space:]]*server[[:space:]]*(\{|$)/) inblk = 1
+
+      if (inblk) buf = buf $0 "\n"; else print
+
+      depth += nopen - nclose
+
+      if (inblk && depth <= 0) { flush(); inblk = 0; depth = 0 }
+    }
+    END { flush(); if (hits > 0) print "REWROTE=" hits > "/dev/stderr" }
+  ' "$1"
+}
+
+for link in /etc/nginx/sites-enabled/*; do
+  [ -e "$link" ] || continue
+  f=$(readlink -f "$link")
+  grep -q 'mynewsfactory' "$f" 2>/dev/null || continue
+
+  tmp=$(mktemp)
+  rewrite_blocks "$f" 2>/dev/null > "$tmp"
+
+  if cmp -s "$f" "$tmp"; then
+    rm -f "$tmp"
   else
-    bad "vhost has NO 443 block - HTTPS for this domain falls through to another site"
-    bad "fix: certbot --nginx -d mynewsfactory.com -d www.mynewsfactory.com"
-  fi
-  if grep -q "proxy_pass http://127.0.0.1:3000" "$VH"; then
-    bad "vhost still proxies to port 3000 (that is rareminting's port) - correcting to $PORT"
-    sed -i "s#proxy_pass http://127\.0\.0\.1:3000#proxy_pass http://127.0.0.1:$PORT#g" "$VH"
+    cat "$tmp" > "$f" && rm -f "$tmp"
+    bad "corrected proxy_pass 3000 -> $PORT in $f"
     CHANGED=1
   fi
-  grep -nE 'server_name|listen|proxy_pass|ssl_certificate ' "$VH" | sed 's/^/      /'
-fi
+
+  echo "   $f"
+  awk '/^[[:space:]]*(server_name|proxy_pass|listen)/ {print "      " $0}' "$f" | tr -s ' '
+done
+
+[ "$CHANGED" -eq 0 ] && ok "no port correction was needed"
 
 # ------------------------------------------------- 5. default_server on 443
 step "5. default server on 443"
 if nginx -T 2>/dev/null | grep -qE 'listen[^;]*443[^;]*default_server'; then
-  ok "a 443 default_server already exists - unmatched HTTPS is not leaking"
+  ok "443 default_server exists"
 else
-  bad "NO 443 default_server - unmatched HTTPS lands on whichever site loaded first"
-  echo "      adding a silent catch-all so only exact server_name matches are served"
-
+  bad "no 443 default_server - adding a silent catch-all"
   NGXV=$(nginx -v 2>&1 | sed 's#.*nginx/##; s#[^0-9.].*##')
-  # ssl_reject_handshake needs nginx >= 1.19.4; older builds need a throwaway cert.
   OLDEST=$(printf '1.19.4\n%s\n' "${NGXV:-0}" | sort -V | head -1)
-
   CATCH=/etc/nginx/sites-available/zz-catch-all-ssl
+
   if [ "$OLDEST" = "1.19.4" ]; then
     cat > "$CATCH" <<'EOF'
-# Silent catch-all for HTTPS requests whose SNI matches no site on this host.
-# Without this, such a request is served by whichever 443 block nginx loaded
-# first, which is how one domain ends up showing another domain's site.
+# Silent catch-all for HTTPS whose SNI matches no site here. Without it, such a
+# request is served by whichever 443 block loaded first -- somebody else's site.
 server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
@@ -116,14 +134,10 @@ server {
 }
 EOF
   else
-    # nginx older than 1.19.4 has no ssl_reject_handshake; use a throwaway cert.
     KEY=/etc/ssl/private/nginx-catchall.key
     CRT=/etc/ssl/certs/nginx-catchall.crt
-    if [ ! -f "$CRT" ]; then
-      openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
-        -keyout "$KEY" -out "$CRT" -subj "/CN=invalid" >/dev/null 2>&1
-      chmod 600 "$KEY"
-    fi
+    [ -f "$CRT" ] || { openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+        -keyout "$KEY" -out "$CRT" -subj "/CN=invalid" >/dev/null 2>&1; chmod 600 "$KEY"; }
     cat > "$CATCH" <<EOF
 server {
     listen 443 ssl default_server;
@@ -146,7 +160,7 @@ if [ "$CHANGED" -eq 1 ]; then
     systemctl reload nginx && ok "nginx reloaded"
   else
     restore
-    bad "config was rejected; nothing changed. Paste the error above."
+    bad "config rejected, nothing changed"
     exit 1
   fi
 else
@@ -154,16 +168,15 @@ else
 fi
 
 # ------------------------------------------------------------------ 7. verify
-step "7. what each domain actually serves"
-for host in mynewsfactory.com www.mynewsfactory.com rareminting.com; do
+step "7. what each domain serves"
+for h in mynewsfactory.com www.mynewsfactory.com rareminting.com; do
   code=$(curl -sk --max-time 15 -o /dev/null -w '%{http_code}' \
-         --resolve "$host:443:127.0.0.1" "https://$host/" 2>/dev/null)
-  title=$(curl -sk --max-time 15 --resolve "$host:443:127.0.0.1" "https://$host/" 2>/dev/null \
-          | tr -d '\n' | grep -o '<title[^>]*>[^<]*' | head -1 | sed 's/.*>//')
-  printf '  %-26s %s   %s\n' "$host" "${code:-000}" "${title:-（no title）}"
+         --resolve "$h:443:127.0.0.1" "https://$h/" 2>/dev/null)
+  title=$(curl -sk --max-time 15 --resolve "$h:443:127.0.0.1" "https://$h/" 2>/dev/null \
+          | tr -d '\n' | grep -o '<title[^>]*>[^<]*' | head -1 | sed 's/.*>//' | cut -c1-45)
+  printf '   %-26s %s   %s\n' "$h" "${code:-000}" "${title:-no title}"
 done
 
 step "done"
-echo "  Backup of the previous nginx config: $BACKUP"
-echo "  To undo everything this script did:"
-echo "    rm -rf /etc/nginx && cp -a $BACKUP /etc/nginx && nginx -t && systemctl reload nginx"
+echo "   backup: $BACKUP"
+echo "   undo:   rm -rf /etc/nginx && cp -a $BACKUP /etc/nginx && nginx -t && systemctl reload nginx"
