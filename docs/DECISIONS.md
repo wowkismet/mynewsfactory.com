@@ -213,11 +213,19 @@ repository moved the portal to port 3100, the live vhost still proxied to 3000
 (rareminting's app), and the domain served the wrong site. The repository copy
 was never the thing being served.
 
-**Open at time of writing.** `www.mynewsfactory.com` serves the portal
-correctly; the apex `mynewsfactory.com` does not. The symptom — an exact
-`server_name` match losing to another block — indicates a second server block
-claiming the apex name outside `sites-enabled/`, which the repair script does
-not scan. Diagnosis is in progress.
+**Resolved 2026-09-20.** Both `mynewsfactory.com` and `www.mynewsfactory.com`
+serve the portal. Mapping every `server_name` to its file showed no competing
+claim: `sites-enabled/mynewsfactory.com` holds both names and `sites-enabled/
+rareminting` holds only its own. The apex was fixed by `fix-domain.sh`, which
+corrected the vhost's upstream from port 3000 (rareminting's app) to 3100 and
+added a 443 `default_server`; what remained missing afterwards was a container
+listening on 3100, supplied by the first successful container deploy.
+
+The wrong diagnosis cost three rounds. The symptom — one name working and
+another failing on the same `server_name` line — was read as a competing
+server block, when it was a vhost pointing at an upstream that was not
+running. The lesson stands: read the live configuration before theorising
+about it.
 
 **Impact.** Until the vhost is rendered from source, every routing change needs
 a read-verify-write cycle against the live host, and the repository must not be

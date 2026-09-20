@@ -131,11 +131,9 @@ The portal builds and runs as a Docker container on the VPS, published only on
 `127.0.0.1:3100`, proxied by host nginx with certbot TLS. The host is shared
 with rareminting.com, which owns port 3000.
 
-**Open defect:** `www.mynewsfactory.com` serves the portal correctly; the apex
-`mynewsfactory.com` still serves rareminting. Diagnosis in progress — the
-symptom (exact `server_name` match losing to another block) indicates a second
-server block claiming the apex name outside `sites-enabled/`. Tracked in
-`DECISIONS.md` D-009.
+**Resolved 2026-09-20.** Both the apex and `www` serve the portal over HTTPS,
+from the container on `127.0.0.1:3100`. See `DECISIONS.md` D-009 for the
+misdiagnosis and what actually fixed it.
 
 ---
 

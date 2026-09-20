@@ -232,6 +232,10 @@ The public portal from the pre-phase work (4 routes, 28 static pages) is live
 and stays; it becomes the reader surface of Phase 1 once the data layer
 replaces its fixtures.
 
-**Open operational defect:** `mynewsfactory.com` (apex) serves the wrong site
-while `www.mynewsfactory.com` serves correctly. See D-009. This blocks nothing
-in Phase 0 but must close before Phase 1 ships.
+**Deployment.** The portal is live over HTTPS on both `mynewsfactory.com` and
+`www.mynewsfactory.com`, running as a container on `127.0.0.1:3100` behind
+nginx, on a host shared with rareminting.com. The routing defect tracked as
+D-009 is closed.
+
+Deploys are manual console operations. §49 wants a pipeline; D-008 explains why
+verification runs in CI while deployment does not.

@@ -93,7 +93,21 @@ and success story bookings ₹10,000 plus applicable taxes.
 ## Deploying
 
 The portal runs as a Docker container on the VPS, published on the host's
-loopback at port 3100. nginx proxies `mynewsfactory.com` to it.
+loopback at port 3100. nginx proxies `mynewsfactory.com` and
+`www.mynewsfactory.com` to it over HTTPS.
+
+Deploy from the console, which uses this repository's compose file:
+
+```bash
+cd /srv/mynewsfactory
+git fetch origin <branch> && git checkout FETCH_HEAD -- .
+docker compose up -d --build
+```
+
+Do not deploy this project through Hostinger's Docker Manager as well. It
+stores its own copy of the compose file rather than reading this one, so the
+two drift apart, and both define `container_name: mynewsfactory` — they would
+compete for the same name and the same port.
 
 To deploy an update:
 
