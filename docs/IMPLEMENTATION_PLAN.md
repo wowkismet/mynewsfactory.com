@@ -41,7 +41,7 @@ build passing, and the pipeline runs without any repository secret.
 Corresponds to §95 Phase 1. Ends with a real newsroom serving real content.
 
 ### 1a. Data layer
-- PostgreSQL, Prisma, migration pipeline with rollback strategy (§83)
+- PostgreSQL, parameterised SQL (D-011), migration pipeline with rollback (§83)
 - Core schema: `users`, `profiles`, `countries`, `states`, `cities`,
   `languages`, `currencies`, `categories`, `news`, `news_versions`,
   `news_media`, `reporters`
@@ -223,8 +223,10 @@ mechanical when the need arrives.
 
 | Phase | Status |
 | --- | --- |
-| Phase 0 | In progress |
-| Phases 1–8 | Not started |
+| Phase 0 | Complete — lint, 90 tests, CI green |
+| Phase 1a — data layer | Schema, migrations, repository and seed done and tested; the portal still reads fixtures |
+| Phase 1b–1e | Not started |
+| Phases 2–8 | Not started |
 
 The public portal from the pre-phase work (4 routes, 28 static pages) is live
 and stays; it becomes the reader surface of Phase 1 once the data layer

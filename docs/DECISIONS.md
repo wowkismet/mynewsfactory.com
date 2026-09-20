@@ -243,3 +243,45 @@ editorial integrity failure, not a placeholder.
 
 **Impact.** The launch checklist must include real editorial content. An empty
 newsroom is a better failure than a fictional one.
+
+---
+
+## D-011 — Parameterised SQL over an ORM, with a real PostgreSQL in tests
+
+**Date:** 2026-09-20
+
+**Decision.** The data layer is hand-written parameterised SQL behind a
+two-method interface (`query`, plus a transaction helper), not Prisma or
+another ORM. The same interface is satisfied by node-postgres in production and
+by PGlite — PostgreSQL compiled to WebAssembly — in tests.
+
+**Reason.** §3 says to prefer Prisma "if the existing repository does not
+constrain the architecture", and §97 says to prefer the simplest
+production-grade solution. Three things decided it:
+
+- **Injection is prevented by construction.** Every value is a bound
+  parameter. There is no query-builder escape hatch where a raw fragment can be
+  concatenated, and no place where a template literal silently becomes SQL.
+- **Tests run against real PostgreSQL.** `CHECK` constraints, enum types,
+  `BEFORE UPDATE` triggers, row-value comparisons and partial indexes all
+  behave exactly as they will in production, with no mock and no service
+  container in CI. The schema's guarantees are tested as guarantees.
+- **The schema is the source of truth.** Append-only history and the
+  published-state invariant are enforced by triggers and constraints that no
+  application bug, ad-hoc script or future ORM can bypass. An ORM's model
+  definitions would compete with the schema for that role.
+
+**Alternatives.** Prisma — mature, good types, and the specification's first
+suggestion. Rejected for now because its migration workflow expects a running
+database, its generated client would duplicate the schema in a second place,
+and raw SQL for the constraint and trigger logic would be needed regardless.
+Kysely — typed query building without codegen, a reasonable middle ground;
+rejected as an abstraction that is not yet earning its dependency.
+
+**Impact.** Row types are the caller's assertion about a SQL string's columns,
+which no type system can verify. That assertion is explicit and localised to
+`repository.ts`, and the repository tests exercise every query against a real
+database, so a mismatch fails a test rather than reaching production. If the
+schema grows past the point where hand-written SQL is the bottleneck, this
+decision is revisited — the interface is narrow enough to swap.
+

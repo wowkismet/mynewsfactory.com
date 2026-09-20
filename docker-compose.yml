@@ -5,6 +5,42 @@
 # rareminting.com runs on 3000 and must stay untouched.
 
 services:
+  # PostgreSQL is reachable only on the compose network. No host port is
+  # published: nothing outside these containers needs to reach the database,
+  # and the server is shared with another production site.
+  db:
+    image: postgres:17-alpine
+    container_name: mynewsfactory-db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mynewsfactory}
+      POSTGRES_USER: ${POSTGRES_USER:-mynewsfactory}
+      # Required. Compose fails to start rather than defaulting to a
+      # guessable password (docs/DECISIONS.md, and no secrets in source).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # scram-sha-256 for any new connection, including from the host.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-mynewsfactory} -d $${POSTGRES_DB:-mynewsfactory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   web:
     build:
       context: .
@@ -16,9 +52,19 @@ services:
     ports:
       - "127.0.0.1:3100:3000"
 
+    depends_on:
+      db:
+        condition: service_healthy
+
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      # sslmode=disable is correct here and only here: the connection never
+      # leaves the container network. Any database reached over a network
+      # requires TLS -- see web/src/lib/db/pool.ts.
+      DATABASE_URL: >-
+        postgres://${POSTGRES_USER:-mynewsfactory}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-mynewsfactory}?sslmode=disable
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://mynewsfactory.com}
 
     # --- hardening ---
     security_opt:
@@ -33,3 +79,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  db-data:

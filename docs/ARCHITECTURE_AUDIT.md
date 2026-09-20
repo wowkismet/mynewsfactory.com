@@ -186,8 +186,13 @@ any of it — there is no stub, no table, no route handler.
 
 ## 6. Existing database schema
 
-None. There is no database, no migration directory and no ORM.
-`web/.env.example` contains a commented-out `DATABASE_URL` as a placeholder.
+**Superseded on 2026-09-20.** At the time of this audit there was no database.
+Phase 1a has since added the schema, migrations, repository and seed; see
+`DATABASE.md`. The portal's pages still read fixtures — rewiring them is the
+remaining half of Phase 1a.
+
+This section is left as written because the audit is a record of the baseline,
+not a live document.
 
 ---
 
