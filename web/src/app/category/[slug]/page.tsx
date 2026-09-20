@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { getArticlesByCategory, getCategories, getCategory } from '@/lib/content'
 import { StoryCard } from '@/components/Story'
 
-type Props = { params: Promise<{ slug: string }> }
+interface Props { params: Promise<{ slug: string }> }
 
 export async function generateStaticParams() {
   const categories = await getCategories()

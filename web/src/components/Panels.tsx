@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { getCities } from '@/lib/content'
 import { money, moneyRange, pricing } from '@/lib/pricing'
 
-const SIDE_LINKS: Array<{ label: string; href: string; note?: string; air?: boolean }> = [
+const SIDE_LINKS: { label: string; href: string; note?: string; air?: boolean }[] = [
   { label: 'Home', href: '/' },
   { label: 'Live TV', href: '/category/breaking', note: 'On air', air: true },
   { label: 'Videos', href: '/category/technology' },
@@ -104,7 +104,7 @@ export function QuickPoll() {
             <span className="meta">{o.pct}%</span>
           </div>
           <div className="track2">
-            <div className="fill" style={{ width: `${o.pct}%` }} />
+            <div className="fill" style={{ width: `${o.pct.toString()}%` }} />
           </div>
         </div>
       ))}

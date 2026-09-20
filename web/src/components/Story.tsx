@@ -5,16 +5,16 @@ import { getReporter } from '@/lib/content'
 /** Compact relative time, e.g. "12 min ago", "3 h ago", "2 d ago". */
 export function timeAgo(iso: string, now: number = Date.UTC(2026, 8, 14, 18, 0, 0)): string {
   const mins = Math.max(1, Math.round((now - new Date(iso).getTime()) / 60000))
-  if (mins < 60) return `${mins} min ago`
+  if (mins < 60) return `${mins.toString()} min ago`
   const hours = Math.round(mins / 60)
-  if (hours < 24) return `${hours} h ago`
-  return `${Math.round(hours / 24)} d ago`
+  if (hours < 24) return `${hours.toString()} h ago`
+  return `${Math.round(hours / 24).toString()} d ago`
 }
 
 export function views(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M views`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K views`
-  return `${n} views`
+  return `${n.toString()} views`
 }
 
 export function Byline({ reporter }: { reporter: Reporter }) {

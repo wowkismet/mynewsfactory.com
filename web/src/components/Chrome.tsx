@@ -3,7 +3,7 @@ import Clock from './Clock'
 import { getCategories } from '@/lib/content'
 import { money, pricing } from '@/lib/pricing'
 
-export async function TopBar() {
+export function TopBar() {
   return (
     <div className="utility">
       <div className="shell">
@@ -24,7 +24,7 @@ export async function TopBar() {
   )
 }
 
-export async function Masthead() {
+export function Masthead() {
   return (
     <header className="masthead">
       <div className="shell">

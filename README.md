@@ -32,8 +32,26 @@ npm run dev          # http://localhost:3000
 ```bash
 npm run build        # production build
 npm run start        # serve the build
+npm run lint         # eslint, type-aware
 npm run typecheck    # tsc --noEmit
+npm run test         # vitest
+npm run verify       # everything CI runs, in CI's order
 ```
+
+## Documentation
+
+Engineering documentation lives in `docs/`:
+
+| Document | Contents |
+| --- | --- |
+| `ARCHITECTURE_AUDIT.md` | What this repository actually contains, measured |
+| `IMPLEMENTATION_PLAN.md` | Phased plan from here to the full platform |
+| `THREAT_MODEL.md` | Assets, actors, threats, mitigations, acceptance gate |
+| `DECISIONS.md` | Engineering decisions, with reasons and alternatives |
+| `TESTING.md` | Test strategy, current coverage, per-phase requirements |
+
+Read `ARCHITECTURE_AUDIT.md` first. It is candid about the gap between this
+repository and the full specification.
 
 ## Design system
 
@@ -58,7 +76,11 @@ and success story bookings ₹10,000 plus applicable taxes.
   `Referrer-Policy` and `Permissions-Policy` set in `web/next.config.mjs`
 - `poweredByHeader` disabled
 - No `dangerouslySetInnerHTML` anywhere; article bodies render as escaped text
-- `npm audit` reports 0 vulnerabilities at the time of commit
+- `npm audit` reports 0 vulnerabilities, including dev dependencies
+- Type-aware ESLint bans `dangerouslySetInnerHTML`, `innerHTML`, `eval` and
+  dynamic `Function` construction outright
+- CI verifies every push: lint, typecheck, test, build, dependency audit, and a
+  container build that must serve a request before the job passes
 
 ## Deploying
 

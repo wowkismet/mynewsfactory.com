@@ -1,0 +1,108 @@
+# Verification pipeline (§49).
+#
+# This workflow holds NO secrets and performs NO deployment. It exists only to
+# prove that a change lints, typechecks, tests, builds and carries no known
+# vulnerable dependency. Deployment is a separate, separately authorised
+# pipeline -- see docs/DECISIONS.md D-008 for why the two are not combined.
+#
+# Before this workflow is ever granted a secret, pin each action to a full
+# commit SHA rather than a tag (§50): a tag can be moved, a SHA cannot.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Least privilege: this pipeline only reads the repository.
+permissions:
+  contents: read
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # `npm ci` installs exactly the lockfile, and fails if package.json and
+      # the lockfile disagree. `npm install` would silently resolve a different
+      # tree than the one reviewed.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      # Runtime dependencies must be clean. Dev-only advisories are reported
+      # but do not fail the build, since they never reach production.
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=low
+
+      - name: Audit all dependencies (informational)
+        run: npm audit || true
+
+  container:
+    name: Container build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # Builds the image the server actually runs, so a Dockerfile regression
+      # is caught here rather than on the VPS during a deploy.
+      - name: Build the image
+        run: docker build --file Dockerfile --tag mynewsfactory:ci .
+        working-directory: .
+
+      - name: Start the container and check it serves
+        working-directory: .
+        run: |
+          docker run --rm --detach --name mnf-ci --publish 127.0.0.1:3100:3000 mynewsfactory:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3100/; then
+              echo "container serves on 3100"
+              docker stop mnf-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "container did not answer within 60s"
+          docker logs mnf-ci
+          docker stop mnf-ci
+          exit 1

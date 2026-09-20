@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { getArticle, getArticles, getCategory, getCity, getRelated, getReporter } from '@/lib/content'
 import { StoryCard, timeAgo, views } from '@/components/Story'
 
-type Props = { params: Promise<{ slug: string }> }
+interface Props { params: Promise<{ slug: string }> }
 
 export async function generateStaticParams() {
   const all = await getArticles()

@@ -248,7 +248,9 @@ export async function getArticlesByCity(slug: string): Promise<Article[]> {
 }
 
 export async function getBreaking(): Promise<Article[]> {
-  return articles.filter((a) => a.breaking || a.live).sort(byNewest)
+  // Explicit comparisons: these flags are `boolean | undefined`, so `??` would
+  // return `false` instead of falling through to `live`. See content.test.ts.
+  return articles.filter((a) => a.breaking === true || a.live === true).sort(byNewest)
 }
 
 /** The lead story for the homepage. */
