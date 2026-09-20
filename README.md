@@ -60,18 +60,25 @@ and success story bookings ₹10,000 plus applicable taxes.
 - No `dangerouslySetInnerHTML` anywhere; article bodies render as escaped text
 - `npm audit` reports 0 vulnerabilities at the time of commit
 
-## Deploying to the VPS
+## Deploying
 
-The site builds to a Node server. On the host:
+The portal runs as a Docker container on the VPS, published on the host's
+loopback at port 3100. nginx proxies `mynewsfactory.com` to it.
+
+To deploy an update:
 
 ```bash
-cd web && npm ci && npm run build
-npm run start -- -p 3000
+cd /srv/mynewsfactory
+git pull
+docker compose up -d --build
 ```
 
-Then point the existing nginx vhost for `mynewsfactory.com` at
-`http://127.0.0.1:3000` with `proxy_pass`, replacing the static `root`, and
-reload nginx. Run the Node process under systemd so it survives reboots.
+The container listens on 3000 inside its own network namespace and is reachable
+on the host only at 127.0.0.1:3100. Host port 3000 belongs to rareminting.com,
+which shares this server — keep it that way.
+
+`deploy/` also holds a systemd unit, the nginx vhost and an installer for a
+non-container deployment; the container is the one in use.
 
 ## Not in this phase
 
