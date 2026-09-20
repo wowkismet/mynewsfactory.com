@@ -13,12 +13,21 @@ services:
     container_name: mynewsfactory-db
     restart: unless-stopped
 
+    # Opt-in. The portal does not read the database yet, so a plain
+    # `docker compose up -d` must not be blocked by it. Start PostgreSQL with:
+    #   docker compose --profile db up -d
+    profiles: ["db"]
+
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mynewsfactory}
       POSTGRES_USER: ${POSTGRES_USER:-mynewsfactory}
-      # Required. Compose fails to start rather than defaulting to a
-      # guessable password (docs/DECISIONS.md, and no secrets in source).
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # No default. The postgres image refuses to initialise without a
+      # password and says so plainly, so an empty value fails loudly at
+      # startup rather than silently creating a guessable database.
+      # Compose interpolates the whole file regardless of profiles, so this
+      # cannot use the `:?` form without breaking deploys that never start
+      # the database.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       # scram-sha-256 for any new connection, including from the host.
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
 
@@ -52,19 +61,15 @@ services:
     ports:
       - "127.0.0.1:3100:3000"
 
-    depends_on:
-      db:
-        condition: service_healthy
-
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
-      # sslmode=disable is correct here and only here: the connection never
-      # leaves the container network. Any database reached over a network
-      # requires TLS -- see web/src/lib/db/pool.ts.
-      DATABASE_URL: >-
-        postgres://${POSTGRES_USER:-mynewsfactory}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-mynewsfactory}?sslmode=disable
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://mynewsfactory.com}
+      # DATABASE_URL is deliberately absent: the pages still read fixtures.
+      # It returns, together with depends_on and the `db` profile becoming the
+      # default, in the commit that wires the repository into the routes.
+      # sslmode=disable will be correct there and only there -- the connection
+      # never leaves the container network (see web/src/lib/db/pool.ts).
 
     # --- hardening ---
     security_opt:

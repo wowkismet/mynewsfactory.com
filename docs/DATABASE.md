@@ -152,9 +152,18 @@ is in production.
 
 ```bash
 cp web/.env.example web/.env.local     # fill in DATABASE_URL
-docker compose up -d db
+docker compose --profile db up -d db   # PostgreSQL is opt-in until the
+                                       # pages read it; see below
 cd web && npm run db:migrate && npm run db:seed
 ```
+
+The database sits behind a compose profile on purpose. The portal's pages
+still read fixtures, so a plain `docker compose up -d` deploys the site and
+does not require a database to exist. Compose interpolates the entire file
+regardless of which profiles are active, so requiring `POSTGRES_PASSWORD`
+with the `:?` form would have blocked every deploy, database or not — it
+did, once. The postgres image refuses to initialise without a password and
+says so clearly, which gives the same protection at the point it matters.
 
 `POSTGRES_PASSWORD` has no default: compose refuses to start without it rather
 than falling back to something guessable. Generate one with

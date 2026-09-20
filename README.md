@@ -41,7 +41,7 @@ npm run verify       # everything CI runs, in CI's order
 ```
 
 ```bash
-docker compose up -d db
+docker compose --profile db up -d db   # opt-in; the pages still read fixtures
 cd web && npm run db:migrate && npm run db:seed
 ```
 
@@ -101,6 +101,13 @@ To deploy an update:
 cd /srv/mynewsfactory
 git pull
 docker compose up -d --build
+```
+
+This starts the portal only. PostgreSQL is behind the `db` profile until the
+pages read it:
+
+```bash
+docker compose --profile db up -d
 ```
 
 The container listens on 3000 inside its own network namespace and is reachable
