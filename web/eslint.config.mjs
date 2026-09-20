@@ -77,9 +77,10 @@ export default tseslint.config(
     rules: { '@typescript-eslint/require-await': 'off' },
   },
 
-  // Configuration files are not part of the typed program.
+  // Plain-JavaScript tooling is not part of the typed program.
   {
-    files: ['*.mjs', '*.config.*'],
+    files: ['*.mjs', '*.config.*', 'scripts/**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
+    languageOptions: { parserOptions: { projectService: false, project: false } },
   },
 )

@@ -50,7 +50,9 @@
   --mono:  "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --shadow: 0 1px 2px rgba(23,20,15,.05), 0 8px 24px -16px rgba(23,20,15,.3);
-  --maxw: 1400px;
+  /* Fluid to the viewport, capped at a readable measure. A fixed 1400 left
+     520px of empty margin on a 1920 screen. */
+  --maxw: 1720px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -74,7 +76,11 @@ img { max-width: 100%; display: block; }
 
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
 
-.shell { max-width: var(--maxw); margin: 0 auto; padding-inline: 18px; }
+.shell {
+  max-width: var(--maxw); margin: 0 auto;
+  /* Gutter grows with the viewport instead of stranding the content. */
+  padding-inline: clamp(12px, 2.2vw, 34px);
+}
 
 /* skip link for keyboard users */
 .skip {
@@ -222,8 +228,63 @@ img { max-width: 100%; display: block; }
   grid-template-columns: 178px minmax(0,1fr) 250px 268px;
   gap: 18px; align-items: start;
 }
-@media (max-width: 1240px) { .grid4 { grid-template-columns: 170px minmax(0,1fr) 250px; } .rail-c { display: none } }
-@media (max-width: 950px)  { .grid4 { grid-template-columns: 1fr; } .sidenav { display: none } }
+
+/* Columns reflow; they are never hidden. Previously .rail-c disappeared below
+   1240px and .sidenav below 950px, which removed real content from the page and
+   left the remaining columns stretched across the gap. Each one now becomes a
+   full-width row instead, laid out horizontally so it fills the space it takes. */
+
+@media (max-width: 1420px) {
+  .grid4 { grid-template-columns: 172px minmax(0,1fr) 258px; }
+  .rail-c { grid-column: 1 / -1; }
+  .rail-c .items {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 0 18px;
+  }
+  .rail-c .items .item { border-bottom: 1px solid var(--rule); }
+}
+
+@media (max-width: 1080px) {
+  .grid4 { grid-template-columns: minmax(0,1fr) 262px; }
+
+  /* Reading order once the columns stack: the lead story first, then the
+     secondary navigation last. In source order the left column comes first,
+     which put "Most read" above the front-page lead.
+
+     World sits beside the hero rather than after the full-width rail -- put
+     the rail second and the 262px slot next to the hero is left empty. */
+  .col-main  { order: 1; }
+  .col-world { order: 2; }
+  .rail-c    { order: 3; }
+  .col-nav   { order: 4; }
+  /* The whole left stack becomes a full-width band: the section list scrolls
+     horizontally and the trending list runs in columns, so nothing is hidden
+     and nothing is left as a tall narrow strip. */
+  .col-nav { grid-column: 1 / -1; }
+  .col-nav .sidenav {
+    position: static; display: flex; overflow-x: auto; scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  .col-nav .sidenav a {
+    border-bottom: 0; border-right: 1px solid rgba(255,255,255,.09); white-space: nowrap;
+  }
+  .col-nav .ranked { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 9px 18px; }
+}
+
+@media (max-width: 820px) {
+  .grid4 { grid-template-columns: minmax(0,1fr); }
+
+  /* One column, so nothing can be stranded beside anything: live coverage
+     moves back ahead of the world panel. */
+  .rail-c    { order: 2; }
+  .col-world { order: 3; }
+  .col-world { grid-column: 1 / -1; }
+  .col-world .world .stats { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+  .col-world { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+}
+
+@media (max-width: 560px) {
+  .rail-c .items { grid-template-columns: 1fr; }
+}
 
 /* left side nav */
 .sidenav { background: var(--dark); position: sticky; top: 12px; }
@@ -242,11 +303,10 @@ img { max-width: 100%; display: block; }
 /* hero */
 .hero { background: var(--surface); border: 1px solid var(--rule); }
 .hero .figure {
-  aspect-ratio: 16/9; background:
-    repeating-linear-gradient(135deg, var(--tint2) 0 12px, var(--tint3) 12px 24px);
-  display: flex; align-items: center; justify-content: center; position: relative;
+  aspect-ratio: 16/9; background: var(--tint2);
+  position: relative; overflow: hidden;
 }
-.hero .figure .ph { color: var(--ink4); }
+.hero .figure svg, .card .figure svg, .article .figure svg { width: 100%; height: 100%; display: block; }
 .hero .flag { position: absolute; top: 12px; left: 12px; }
 .hero .body { padding: 18px 20px 20px; }
 .hero h2 {
@@ -290,20 +350,21 @@ img { max-width: 100%; display: block; }
 .rail .item:hover { background: var(--tint); }
 .rail .thumb {
   width: 52px; height: 52px; flex-shrink: 0;
-  background: repeating-linear-gradient(135deg, var(--tint2) 0 8px, var(--tint3) 8px 16px);
+  background: var(--tint2); overflow: hidden; display: block;
 }
+.rail .thumb svg { width: 100%; height: 100%; display: block; }
 .rail h4 { margin: 0; font-size: 13.5px; font-weight: 600; line-height: 1.28; letter-spacing: -.006em; }
 .rail .m { margin-top: 5px; }
 
 /* ---------- section bands ---------- */
 .band { margin-top: 30px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px,1fr)); gap: 14px; }
-.card { background: var(--surface); border: 1px solid var(--rule); display: flex; flex-direction: column; }
-.card .figure {
-  aspect-ratio: 16/9;
-  background: repeating-linear-gradient(135deg, var(--tint2) 0 10px, var(--tint3) 10px 20px);
-  display: flex; align-items: center; justify-content: center; color: var(--ink4);
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(210px, 17vw, 262px), 1fr));
+  gap: 14px;
 }
+.card { background: var(--surface); border: 1px solid var(--rule); display: flex; flex-direction: column; }
+.card .figure { aspect-ratio: 16/9; background: var(--tint2); overflow: hidden; }
 .card .body { padding: 13px 14px 14px; display: flex; flex-direction: column; gap: 7px; flex: 1; }
 .card h3 { font-family: var(--serif); font-size: 17px; font-weight: 600; line-height: 1.25; letter-spacing: -.008em; }
 .card p { margin: 0; font-size: 13px; color: var(--ink3); }
@@ -385,3 +446,77 @@ img { max-width: 100%; display: block; }
 .pagehead p { margin: 8px 0 0; color: var(--ink3); font-size: 15.5px; max-width: 60ch; }
 
 .empty { padding: 40px 0; color: var(--ink4); font-family: var(--mono); font-size: 13px; }
+
+/* ---------- column stacks ---------- */
+/* Each grid column is a stack of modules rather than a single panel, so the
+   four columns reach comparable heights and the page has no dead band. */
+.col { display: grid; gap: 14px; align-content: start; }
+
+.col-mod { background: var(--surface); border: 1px solid var(--rule); padding: 13px 14px 14px; }
+.col-mod .k { color: var(--ink4); }
+
+.ranked { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 9px; }
+.ranked li { display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 9px; align-items: baseline; }
+.ranked .rank { font-family: var(--mono); font-size: 11px; color: var(--red); font-weight: 600; }
+.ranked a { display: grid; gap: 2px; }
+.ranked .t {
+  font-family: var(--serif); font-size: 13.5px; line-height: 1.3;
+  font-weight: 600; letter-spacing: -.006em; color: var(--ink);
+  /* A 178px column turns a long headline into four lines, which is what made
+     this column run 450px past the others. Two lines, then ellipsis. */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+@media (max-width: 1080px) { .ranked .t { -webkit-line-clamp: 3; } }
+.ranked a:hover .t { color: var(--red); }
+.ranked .meta { font-size: 11px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip {
+  font-family: var(--sans); font-size: 11.5px; letter-spacing: .01em;
+  padding: 4px 9px; border: 1px solid var(--rule2); background: var(--tint);
+  color: var(--ink3); white-space: nowrap;
+}
+.chip:hover { border-color: var(--red); color: var(--red); }
+
+.desks { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.desks a { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--rule2); }
+.desks li:last-child a { border-bottom: 0; padding-bottom: 0; }
+.desks .t { font-size: 13px; font-weight: 600; color: var(--ink); letter-spacing: -.004em; }
+.rail-c .items .item h4 {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.desks a:hover .t { color: var(--red); }
+.desks .meta { font-size: 11px; }
+
+/* House advertising slot: a real promotion, not a grey rectangle. */
+.world .promo { position: relative; display: block; overflow: hidden; aspect-ratio: 4/3; }
+.world .promo svg { width: 100%; height: 100%; display: block; }
+.world .promo .over {
+  position: absolute; inset: auto 0 0 0; padding: 10px 11px;
+  background: linear-gradient(to top, rgba(0,0,0,.72), transparent);
+  display: grid; gap: 2px;
+}
+.world .promo .over .lbl { color: #fff; }
+.world .promo .cta { font-family: var(--mono); font-size: 11px; color: var(--amber); }
+
+.sections .chips { margin-top: 12px; }
+.sections .chip { font-size: 12.5px; padding: 6px 12px; }
+
+/* Secondary leads, directly under the hero. */
+.secondary { background: var(--surface); border: 1px solid var(--rule); }
+.secondary .items { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.secondary .items .item { border-bottom: 0; }
+@media (max-width: 520px) { .secondary .items { grid-template-columns: 1fr; } }
+
+.duty { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 9px; }
+.duty li { display: grid; grid-template-columns: 26px minmax(0,1fr) auto; gap: 9px; align-items: center; }
+.duty .av {
+  width: 26px; height: 26px; display: grid; place-items: center;
+  background: var(--dark); color: var(--paper);
+  font-family: var(--sans); font-size: 12px; font-weight: 600;
+}
+.duty .who { display: grid; gap: 1px; min-width: 0; }
+.duty .t { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.duty .meta { font-size: 10.5px; }
+.duty .tick { color: var(--teal); font-size: 9.5px; }

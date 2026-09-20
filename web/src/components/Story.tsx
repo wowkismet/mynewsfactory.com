@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Artwork } from './Artwork'
 import type { Article, Reporter } from '@/lib/types'
 import { getReporter } from '@/lib/content'
 
@@ -32,7 +33,7 @@ export async function HeroStory({ article }: { article: Article }) {
     <article className="hero">
       <div className="figure">
         <span className="flag badge">{article.live ? 'Live' : 'Breaking news'}</span>
-        <span className="ph lbl">Hero image 16:9</span>
+        <Artwork seed={article.slug} category={article.categorySlug} ratio="16:9" alt="" />
       </div>
       <div className="body">
         <div className="lbl" style={{ color: 'var(--red)' }}>{article.kicker}</div>
@@ -54,7 +55,9 @@ export async function StoryCard({ article }: { article: Article }) {
   const reporter = await getReporter(article.reporterSlug)
   return (
     <article className="card">
-      <div className="figure lbl">Image 16:9</div>
+      <div className="figure">
+        <Artwork seed={article.slug} category={article.categorySlug} ratio="16:9" alt="" />
+      </div>
       <div className="body">
         <div className="lbl" style={{ color: 'var(--red)' }}>{article.kicker}</div>
         <h3><Link href={`/news/${article.slug}`}>{article.title}</Link></h3>
@@ -71,7 +74,9 @@ export async function StoryCard({ article }: { article: Article }) {
 export function RailItem({ article }: { article: Article }) {
   return (
     <Link className="item" href={`/news/${article.slug}`}>
-      <span className="thumb" aria-hidden="true" />
+      <span className="thumb">
+        <Artwork seed={article.slug} category={article.categorySlug} ratio="1:1" alt="" />
+      </span>
       <span>
         <h4>{article.title}</h4>
         <span className="m meta">{views(article.views)} · {timeAgo(article.publishedAt)}</span>
