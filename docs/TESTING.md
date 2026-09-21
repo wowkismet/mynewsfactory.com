@@ -23,10 +23,20 @@ add before it can be called complete under §80.
 
 | Suite | File | Tests | What it protects |
 | --- | --- | --- | --- |
-| Pricing | `web/src/lib/pricing.test.ts` | 11 | Amounts whole and non-negative, bands ordered, referral maths exact, currency and locale well-formed, formatting correct |
-| Content | `web/src/lib/content.test.ts` | 23 | Referential integrity, slug uniqueness and URL safety, unknown-key lookups return `undefined` rather than throwing, filters do not leak across categories or cities, `getRelated` excludes its own article and deduplicates, bodies contain no markup |
+| Pricing | `lib/pricing.test.ts` | 11 | Amounts whole and non-negative, bands ordered, referral maths exact, formatting |
+| Content | `lib/content.test.ts` | 23 | Referential integrity, slug uniqueness, filters that do not leak, bodies contain no markup |
+| Schema | `lib/db/schema.test.ts` | 15 | Constraints, triggers and delete behaviour, against real PostgreSQL |
+| Cursors | `lib/db/cursor.test.ts` | 15 | Opaque encoding; malformed, forged and oversized cursors |
+| Repository | `lib/db/repository.test.ts` | 24 | Keyset pagination, scoped filters, unpublished stories invisible |
+| TOTP | `lib/auth/totp.test.ts` | 25 | Every RFC 6238 vector, replay refusal, malformed codes |
+| Credentials | `lib/auth/crypto.test.ts` | 37 | Argon2id parameters, sealed secrets, tamper detection, recovery codes |
+| Identity | `lib/db/identity.test.ts` | 50 | Sessions, refresh reuse detection, RBAC scope, audit immutability, lockout |
 
-34 tests. Runner: Vitest 5, Node environment. `npm test` in `web/`.
+202 tests, 91 of them against real PostgreSQL. Runner: Vitest 5.
+
+The database tests build one in-process PostgreSQL per file and truncate
+between tests rather than migrating per test — the identity file went from 108
+seconds to 7 doing that, with the same isolation.
 
 Two of these already earn their place:
 
@@ -65,6 +75,8 @@ dangerous illusion of safety for a payments system.
 ## Required per phase
 
 ### Phase 1 — Foundation
+
+Done for 1a and 1b; the rest needs the API surface.
 
 - Unit: authorization decisions, session lifecycle, content state transitions
 - Integration: every `/api/v1` endpoint against a real PostgreSQL instance

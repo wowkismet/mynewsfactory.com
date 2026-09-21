@@ -49,6 +49,21 @@ Migration `0001_core` creates reference data, people and the newsroom.
 | `news_versions` | Append-only editorial history |
 | `news_media` | Storage keys, never public URLs |
 
+Migration `0002_identity` adds authentication and authorization.
+
+| Table | Purpose |
+| --- | --- |
+| `user_credentials` | Argon2id password hashes, one per account |
+| `user_tokens` | Single-use email verification and password reset tokens |
+| `sessions` | Live sessions with device context; addresses keyed-hashed |
+| `refresh_tokens` | Single-use refresh tokens with a rotation chain |
+| `mfa_credentials` | TOTP secrets, encrypted at rest |
+| `mfa_recovery_codes` | Hashed, single-use recovery codes |
+| `roles`, `permissions`, `role_permissions` | The authorization catalogue |
+| `user_roles` | Grants, optionally scoped to a country or city |
+| `audit_events` | Append-only record of privileged actions |
+| `login_attempts` | Keyed-hash attempt log backing lockout |
+
 ### Guarantees the database makes on its own
 
 These hold even when application code is wrong, which is why they are in the
@@ -70,6 +85,28 @@ schema rather than in a service layer. Each is covered by a test in
   optional, `CASCADE` only for media that belongs to one story.
 - **`updated_at` is maintained by the database**, not by whichever code path
   happened to remember.
+- **Only Argon2id password hashes can be stored.** A `CHECK` on the prefix
+  means a weaker algorithm cannot be written even by code that tries.
+- **A revoked session must carry a reason**, so the security dashboard never
+  shows a revocation nobody can explain.
+- **A role grant's scope and its target cannot disagree.** A `COUNTRY` grant
+  must name a country and must not name a city.
+- **At most one live refresh token per session**, by partial unique index —
+  true even if the rotation code is wrong.
+
+### The limit of the append-only guard
+
+`BEFORE UPDATE` and `BEFORE DELETE` triggers make `news_versions` and
+`audit_events` append-only. **`TRUNCATE` does not fire row-level triggers**, so
+it bypasses both. That is how PostgreSQL works, not a gap in the trigger.
+
+The control is a privilege, not a trigger: **the application's database role
+must not own these tables and must not hold `TRUNCATE` on them.** Migrations
+run as a separate, more privileged role.
+
+This is not yet configured — the deployment uses a single role — and it is
+recorded here rather than left implicit. It belongs with the backup work in
+Phase 1e, since both are about what an operator can destroy.
 
 ### Money
 

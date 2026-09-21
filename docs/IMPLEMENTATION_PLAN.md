@@ -85,8 +85,17 @@ Corresponds to §95 Phase 1. Ends with a real newsroom serving real content.
   UI strings
 
 ### Security review for Phase 1
+
 Executable tests for the §53 cases that apply: cross-user profile access,
 role escalation, parameter tampering, session fixation, rate-limit bypass.
+
+The cases reachable without an HTTP surface are done and passing in
+`db/identity.test.ts`: role escalation (a reader, a reporter and an
+administrator each denied what they should not hold), scope escape (a
+city-scoped grant refused outside its city *and* refused when no scope is
+supplied), token replay, refresh-token reuse, cross-account recovery-code use,
+and the audit log's immutability. The remainder — parameter tampering, session
+fixation, IDOR over real endpoints — need Phase 1c and are not yet testable.
 
 **Done when:** a reporter can be created, an editor can move a story through
 the workflow to publication, a reader can read it, every step is audited, and
@@ -223,10 +232,14 @@ mechanical when the need arrives.
 
 | Phase | Status |
 | --- | --- |
-| Phase 0 | Complete — lint, 90 tests, CI green |
+| Phase 0 | Complete — lint, CI green |
 | Phase 1a — data layer | Schema, migrations, repository and seed done and tested; the portal still reads fixtures |
-| Phase 1b–1e | Not started |
+| Phase 1b — identity | Credentials, sessions, MFA, RBAC and audit done and tested; no HTTP surface yet |
+| Phase 1c — API | Not started. This is what makes 1a and 1b reachable |
+| Phase 1d–1e | Not started |
 | Phases 2–8 | Not started |
+
+202 tests, of which 91 run against real PostgreSQL.
 
 The public portal from the pre-phase work (4 routes, 28 static pages) is live
 and stays; it becomes the reader surface of Phase 1 once the data layer

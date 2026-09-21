@@ -293,3 +293,119 @@ database, so a mismatch fails a test rather than reaching production. If the
 schema grows past the point where hand-written SQL is the bottleneck, this
 decision is revisited — the interface is narrow enough to swap.
 
+---
+
+## D-012 — Argon2id through a prebuilt binary, not a compiled dependency
+
+**Date:** 2026-09-21
+
+**Decision.** Passwords are hashed with Argon2id via `@node-rs/argon2`, at
+OWASP's 2024 parameters (19 MiB, two iterations, one lane).
+
+**Reason.** §7 requires secure password hashing, and Argon2id is the current
+recommendation: memory hardness is what makes a GPU or ASIC attack cost what it
+should. `@node-rs/argon2` ships prebuilt binaries including linux-x64-musl, so
+the Alpine runtime image needs no compiler and the build stays reproducible.
+Measured at about 70 ms per hash on the deployment host, which is the right
+side of the usability-versus-cost line.
+
+**Alternatives.** The `argon2` package compiles through node-gyp, adding a
+toolchain to the image for the same algorithm. `crypto.scrypt` is built in and
+needs no dependency at all — genuinely tempting given T-10, and the fallback if
+the native module ever becomes a problem — but it is OWASP's second choice, and
+password hashing is the wrong place to take second choice to save a dependency.
+
+**Impact.** One native dependency, verified by CI's container job on the image
+that actually ships. The stored PHC string carries its own parameters, so
+raising the cost later needs no migration.
+
+---
+
+## D-013 — Tokens stored as digests; refresh reuse revokes the session
+
+**Date:** 2026-09-21
+
+**Decision.** Session, refresh, verification and reset tokens are stored as
+SHA-256 digests. Refresh tokens are single use, and presenting a consumed one
+revokes the entire session rather than refusing the single token.
+
+**Reason.** A token is a bearer credential: whoever holds it is the account. If
+the table stores them, a read of the table is a takeover of every live session.
+A plain digest is right here because the input already has 256 bits of entropy
+— there is nothing to brute-force, and an unsalted digest is what makes lookup
+by token possible.
+
+Reuse detection is the part worth arguing for. A consumed refresh token being
+presented again means it leaked; there is no way to tell whether the legitimate
+client replayed it or an attacker captured it. Refusing just that token leaves
+a live session the attacker may also hold. Revoking the session costs a
+legitimate user one sign-in and costs an attacker everything.
+
+**Alternatives.** Stateless JWTs with short expiry — no revocation, which makes
+"sign out everywhere" and "revoke this device" impossible to honour, both of
+which §7 requires. Storing tokens encrypted rather than hashed — reversible by
+design, which is the property being avoided.
+
+**Impact.** Every session check is a database read; there is no offline
+validation. That is the cost of being able to revoke, and it is worth paying.
+A partial unique index enforces one live refresh token per session even if the
+rotation code is wrong.
+
+---
+
+## D-014 — TOTP implemented here, verified against the RFC's own vectors
+
+**Date:** 2026-09-21
+
+**Decision.** RFC 6238 TOTP is implemented in `auth/totp.ts` rather than taken
+as a dependency.
+
+**Reason.** The algorithm is about forty lines of HMAC and arithmetic, and the
+RFC publishes test vectors that prove an implementation correct. All eighteen
+run as tests, for SHA-1, SHA-256 and SHA-512. A second-factor check is a poor
+place to inherit an unaudited package: it is small enough to read, and its
+correctness is provable rather than assumed.
+
+Writing it also made three properties explicit that a library would have
+decided silently: verification evaluates every candidate step before returning
+so timing reveals nothing, comparison is constant-time, and the accepted step
+is recorded so a code cannot be replayed inside its own validity window.
+
+**Alternatives.** `otplib` and `speakeasy` are widely used and would have
+worked. Rejected because the reason to take a dependency — that the problem is
+large or subtle enough that someone else's version is safer — does not apply to
+forty lines with published vectors.
+
+**Impact.** This code is ours to maintain. The RFC has not changed since 2011,
+and the vectors will fail loudly if it ever does.
+
+---
+
+## D-015 — Low-entropy identifiers are keyed hashes, never plaintext
+
+**Date:** 2026-09-21
+
+**Decision.** IP addresses and the email addresses in the attempt log are
+stored as HMAC-SHA256 digests under a key held in the environment. No table
+holds a plaintext address.
+
+**Reason.** §57 requires data minimisation and prohibits exposing raw addresses
+(§19). The operational need is real — rate limiting, lockout, noticing a
+session that moved networks — but every one of those works on equality, which a
+keyed hash preserves.
+
+The key matters. An unkeyed digest of an IPv4 address is reversible in seconds:
+there are only four billion of them. An unkeyed digest of an email address
+falls to a wordlist. The key means the table alone reveals nothing.
+
+**Alternatives.** Storing addresses plainly with short retention — simpler, and
+still a list of who signed in from where for as long as it exists. Truncating
+addresses — loses the precision rate limiting needs while still being partially
+identifying.
+
+**Impact.** An address cannot be recovered from the database, including by us,
+including under a lawful request. Rotating the key makes existing hashes
+unlinkable: a privacy improvement and an operational inconvenience, so it is
+done deliberately rather than routinely. Geolocation, if ever needed, must
+happen at ingest and store a region, never the address.
+

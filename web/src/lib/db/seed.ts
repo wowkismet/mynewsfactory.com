@@ -9,6 +9,7 @@
 import { articles, categories, cities, reporters } from '../fixtures'
 import type { Db } from './client'
 import { transaction } from './client'
+import { syncRoleCatalogue } from './identity'
 
 /** Reporter slugs are derived once so articles can reference them by id. */
 async function seedReference(tx: Db): Promise<void> {
@@ -213,6 +214,11 @@ export async function seed(db: Db, options: SeedOptions = {}): Promise<void> {
         'Production reads real editorial content; see docs/DECISIONS.md D-010.',
     )
   }
+
+  // Roles and permissions are not demonstration data: they are the
+  // authorization model, and every environment needs them. Synced first so a
+  // seeded account can be granted a role.
+  await syncRoleCatalogue(db)
 
   await transaction(db, async (tx) => {
     await seedReference(tx)

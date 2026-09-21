@@ -11,7 +11,8 @@ This repository currently contains **Phase 1 — the public portal front end**.
 | `web/` | Next.js 16 + TypeScript portal (App Router, React 19) |
 | `web/src/app` | Routes: home, article, category, city |
 | `web/src/components` | Masthead, navigation, ticker, story cards, panels |
-| `web/src/lib/db/` | PostgreSQL access: migrations runner, repository, cursors, seed |
+| `web/src/lib/db/` | PostgreSQL access: migrations runner, repository, cursors, seed, identity |
+| `web/src/lib/auth/` | Password hashing, tokens, TOTP, recovery codes, RBAC |
 | `web/migrations/` | Schema migrations, each with a rollback |
 | `web/src/lib/content.ts` | Fixture accessors the pages still use; the repository replaces them next |
 | `web/src/lib/pricing.ts` | Central pricing configuration — no price is hard-coded |
@@ -57,6 +58,8 @@ Engineering documentation lives in `docs/`:
 | `DECISIONS.md` | Engineering decisions, with reasons and alternatives |
 | `TESTING.md` | Test strategy, current coverage, per-phase requirements |
 | `DATABASE.md` | Schema, access layer, migrations, seeding, operations |
+| `AUTHENTICATION.md` | Credentials, sessions, MFA, brute-force controls |
+| `RBAC.md` | Roles, permissions, scoped grants, audit |
 
 Read `ARCHITECTURE_AUDIT.md` first. It is candid about the gap between this
 repository and the full specification.
