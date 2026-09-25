@@ -409,3 +409,114 @@ unlinkable: a privacy improvement and an operational inconvenience, so it is
 done deliberately rather than routinely. Geolocation, if ever needed, must
 happen at ingest and store a region, never the address.
 
+
+---
+
+## D-016 — CSRF is an origin check, not a token
+
+**Date:** 2026-09-25
+
+**Decision.** State-changing requests authenticated by cookie must carry an
+`Origin` header matching this deployment. There is no CSRF token. The rule does
+not apply to requests authenticated by bearer token.
+
+**Reason.** CSRF exists because a browser attaches cookies to a request the
+user's page did not intend to make. Every such request carries an `Origin`
+naming the site that caused it; page script cannot forge it. Comparing it to
+our own origin refuses the attack at its definition.
+
+A token would add a value to mint, store, rotate, embed in every form, and
+leak — into a URL, a referrer header, an error report. It defends the same
+thing by a longer route.
+
+Restricting the check to cookie-authenticated requests is not a weakening. A
+bearer token is attached by client code, never automatically, so a cross-site
+page cannot cause an authenticated request with one; requiring an `Origin`
+there would break every non-browser client and prevent nothing.
+
+**Alternatives.** Double-submit cookie — the standard answer, and strictly more
+machinery for the same guarantee on a modern browser baseline. `SameSite=Strict`
+alone — would sign a reader out whenever they arrive from a search result,
+which is most arrivals on a news site.
+
+**Impact.** A missing `Origin` on a cookie-authenticated mutation is refused
+rather than allowed, so a client that omits it must use a bearer token. The
+expected origin is derived from the request's own forwarded headers rather than
+configuration, so a host change cannot silently reject every login.
+
+---
+
+## D-017 — Unknown request fields are rejected, not ignored
+
+**Date:** 2026-09-25
+
+**Decision.** A body or query string carrying a field the endpoint does not
+declare is a `400`, naming the field.
+
+**Reason.** Both behaviours are equally safe — an ignored field changes
+nothing. They differ in what an operator learns. A request arriving with
+`role: "SUPER_ADMIN"` alongside the fields a signup form sends is someone
+probing for mass assignment (§53); dropping it silently makes the probe
+invisible, while rejecting it produces a logged event with a request id
+attached. The security property is the same; the observability is not.
+
+**Alternatives.** Allowlist and ignore — the common default, and the reason
+mass-assignment bugs are usually found by an attacker rather than a log.
+
+**Impact.** Clients cannot send speculative fields ahead of a server deploy,
+which makes rollout order matter: add the field to the server first. That is a
+real cost, accepted for the signal.
+
+---
+
+## D-018 — Registration does not disclose whether an address is known
+
+**Date:** 2026-09-25
+
+**Decision.** `POST /auth/register` returns the same status and body whether
+the address was free or already registered. The collision is recorded in the
+audit log.
+
+**Reason.** §77 requires preventing enumeration, and a signup form is the
+easiest oracle in any product: submit an address, read the error. Sign-in is
+already indistinguishable between a wrong password and an unknown account; a
+registration endpoint that answers the question directly makes that effort
+pointless.
+
+**Alternatives.** "That address is already registered" — better for the user
+who forgot, and hands any prober a membership test for arbitrary addresses.
+
+**Impact.** A user who has already registered is directed to password reset by
+the copy rather than by an error, which is where that flow would have sent them
+anyway. Repeated collisions on one address are visible to an operator as an
+audit trail, and are a fraud signal worth having (§35).
+
+---
+
+## D-019 — The rate limiter is in-process until Redis exists
+
+**Date:** 2026-09-25
+
+**Decision.** Per-endpoint rate limiting uses a fixed-window counter in process
+memory. The shared counter waits for the caching phase (§65).
+
+**Reason.** The honest description is that this counts per instance, so N
+instances permit N times the configured rate, and a restart forgets every
+window. It is still the right thing to ship now: one instance is what is
+deployed (D-009), so today the limit is exact, and the alternative was no limit
+on the login endpoint until an unrelated phase lands.
+
+It is also not the only brute-force control, which is what makes the weakness
+tolerable. `login_attempts` counts failures per account in the database —
+shared, durable, and unaffected by instance count. The in-memory limit protects
+the endpoint; the database one protects the account. Losing the first to a
+restart does not lose the second.
+
+**Alternatives.** Redis now — correct, and pulls an infrastructure dependency
+into the phase that was meant to expose the existing layers. Nothing until
+§65 — leaves the most attacked endpoint in the product unprotected.
+
+**Impact.** Horizontal scaling multiplies the effective endpoint limit, so the
+configured numbers must be revisited, not merely re-pointed, when the counter
+moves to Redis. The limiter sweeps expired windows on a fraction of writes
+rather than on a timer, so it holds no process-lifetime state.

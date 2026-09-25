@@ -94,8 +94,16 @@ The cases reachable without an HTTP surface are done and passing in
 administrator each denied what they should not hold), scope escape (a
 city-scoped grant refused outside its city *and* refused when no scope is
 supplied), token replay, refresh-token reuse, cross-account recovery-code use,
-and the audit log's immutability. The remainder — parameter tampering, session
-fixation, IDOR over real endpoints — need Phase 1c and are not yet testable.
+and the audit log's immutability.
+
+The remainder are now done too, and live in `src/app/api/v1/routes.test.ts`
+because they only exist as attacks against a real endpoint: parameter
+tampering (a registration body carrying `role` is refused, not ignored),
+session fixation (a caller-supplied token is never adopted as the new
+session), IDOR (the session endpoint takes no identifier, so naming another
+user changes nothing), CSRF (a cookie-authenticated mutation from another
+origin is refused and the session survives), rate-limit and lockout behaviour,
+and account enumeration on both registration and sign-in.
 
 **Done when:** a reporter can be created, an editor can move a story through
 the workflow to publication, a reader can read it, every step is audited, and
@@ -234,9 +242,10 @@ mechanical when the need arrives.
 | --- | --- |
 | Phase 0 | Complete — lint, CI green |
 | Phase 1a — data layer | Schema, migrations, repository and seed done and tested; the portal still reads fixtures |
-| Phase 1b — identity | Credentials, sessions, MFA, RBAC and audit done and tested; no HTTP surface yet |
-| Phase 1c — API | Not started. This is what makes 1a and 1b reachable |
-| Phase 1d–1e | Not started |
+| Phase 1b — identity | Credentials, sessions, MFA, RBAC and audit done and tested |
+| Phase 1c — API | Complete. Eleven `/api/v1` endpoints behind one pipeline: validation, rate limiting, CSRF, RBAC, structured errors, audit. 62 tests, including the §53 cases that needed an HTTP surface |
+| Phase 1d — MFA challenge | Not started. A privileged account can sign in but cannot yet clear its second factor, so it cannot act |
+| Phase 1e — email delivery | Not started. Verification and reset tokens are issued and stored but never sent |
 | Phases 2–8 | Not started |
 
 202 tests, of which 91 run against real PostgreSQL.
