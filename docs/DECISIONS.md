@@ -750,3 +750,42 @@ SHA, no third-party action anywhere near the key, the host key pinned through
 `VPS_KNOWN_HOSTS` rather than disabling host verification, the key removed in
 an `always()` step, and rareminting.com's health recorded before and after —
 a deploy that breaks the neighbouring site is a failed deploy.
+
+## D-028 — the 4.0 design is followed; its numbers are not
+
+**Decision.** The portal is rebuilt to the 4.0 design — deep navy, gold
+accents, the left sidebar with My Services, the Live World panel, the
+advertising marketplace, the statistics strip. Every figure in those panels is
+counted from the database. Where there is no data, the panel keeps its place in
+the layout and says what it is waiting for.
+
+**Why this needed saying.** The design is a picture of a launched platform. It
+shows 195+ countries, 5,482 live stories, 1.2M users online, 1M+ active
+readers, 50K+ reporters, 10K+ businesses, a poll with five options summing to
+100%, 1,248 votes, and Mumbai at 28° and partly cloudy. Every one of those is a
+number this platform does not have.
+
+A mockup showing them is doing its job — it shows the shape of the thing. A
+running site showing them is lying to whoever reads it, and a visitor has no
+way to tell an aspiration from a measurement. That is §89 exactly, and the
+audit found three of these still in the code from the original build.
+
+**So:**
+
+| Design shows | Portal shows |
+| --- | --- |
+| 195+ countries | the count of active countries |
+| 5,482 live news | the count of published stories |
+| 1.2M users online | sessions that are live right now |
+| 1M+ / 50K+ / 10K+ | published stories, reporters, accounts, countries |
+| Poll at 42/28/15/10/5% | the panel, and that polls are Phase 6 |
+| Mumbai 28°, partly cloudy | the panel, and that no weather feed is connected |
+| Live TV, Videos, Wallet… | listed in the sidebar, marked "soon", linking nowhere |
+
+Small numbers are not embarrassing. Invented ones are disqualifying, and they
+are hard to remove later because by then someone is quoting them.
+
+**The sidebar entries deliberately do not link.** They used to point at page
+anchors — `#polls`, `#surveys` — that did not exist on the page, so clicking
+did nothing at all. A link that goes nowhere is a dead end dressed as
+navigation; a greyed row marked "soon" is an answer.
