@@ -45,12 +45,12 @@ async function Results({ query }: { query: string }) {
       <p className="meta">
         {hits.length.toLocaleString('en')} {hits.length === 1 ? 'story' : 'stories'}
       </p>
-      <ul className="ranked">
+      <ul className="results">
         {hits.map((hit) => (
           <li key={hit.slug}>
             <Link href={`/news/${hit.slug}`}>{hit.title}</Link>
             <span className="meta">
-              {' '}· {hit.reporterName} · {hit.categorySlug}
+              {hit.reporterName} · {hit.categorySlug}
               {hit.citySlug === null ? '' : ` · ${hit.citySlug}`}
             </span>
           </li>

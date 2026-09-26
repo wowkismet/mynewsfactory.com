@@ -199,7 +199,13 @@ export default function MfaSetup({
           <dt>Secret</dt>
           <dd style={{ fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>{offer.secret}</dd>
           <dt>Setup link</dt>
-          <dd style={{ wordBreak: 'break-all' }}>{offer.otpauthUri}</dd>
+          <dd style={{ wordBreak: 'break-all' }}>
+            {/* On a phone this opens the authenticator app and enrols in one
+                tap, which beats transcribing thirty-two characters. On a
+                desktop with no handler it does nothing, so the secret above
+                stays the fallback rather than the only route. */}
+            <a href={offer.otpauthUri}>{offer.otpauthUri}</a>
+          </dd>
         </dl>
         {error !== null && <p className="authnote authnote--bad">{error}</p>}
         <form className="authform" method="post" onSubmit={(e) => { e.preventDefault(); void confirm() }}>

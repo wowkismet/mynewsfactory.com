@@ -45,7 +45,7 @@ export default async function SecurityPage({
   }
 
   return (
-    <div className="shell authpage">
+    <div className="shell authpage authpage--single">
       <div className="pagehead">
         <p className="lbl">Account</p>
         <h1>Security</h1>

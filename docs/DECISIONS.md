@@ -643,3 +643,57 @@ role could not reach anything.
 
 `safeNext` moved to `lib/auth/redirect.ts` because two pages now validate a
 destination. Two validators means the weaker one becomes the way in.
+
+## D-025 — the portal is redesigned, not reskinned
+
+**Decision.** A new visual language replaces the warm-newsprint design. Class
+names are unchanged; `globals.css` decides what they look like.
+
+**What changed.**
+
+- Neutrals are cool and near-achromatic instead of warm paper. The old palette
+  read as a printed broadsheet. This platform is a network people report into,
+  participate in and earn from, and the surface should not pretend to be a
+  newspaper it is not.
+- Labels stop being uppercase monospace everywhere. That was the loudest
+  signature of the old design and it competed with the headlines. Monospace is
+  now reserved for data — counts, timestamps, ids — where tabular figures earn
+  it.
+- Boxes give way to rules and space. Almost every panel was a 1px border round
+  a filled rectangle, which made a page of equal-weight containers with no
+  focal point. Hierarchy now comes from type size, spacing and a hairline. The
+  dashboard is the exception: those modules are genuinely separate concerns
+  side by side, so the container earns its keep there.
+- The section nav is sticky. A reader three screens down should be able to
+  change section without scrolling back up.
+- **Dark mode exists.** The old system had no dark tokens, so a reader with the
+  preference set got a page of bright paper at night.
+
+**Why not rename the classes.** A redesign that also renamed everything would be
+impossible to review: the diff would not distinguish "this looks different" from
+"this behaves differently". The markup describes the page; one file decides how
+it looks.
+
+**Four layout bugs surfaced by the change**, three of them pre-existing:
+
+- `.duty li` always reserved an avatar column, so a text-only item was squeezed
+  into 28px and broke one word per line. It was also `display: grid`, which put
+  a `<strong>` and the text after it on separate rows. The grid layout is now
+  claimed by `:has(.av)`.
+- `.ranked li` reserved a rank gutter the same way. Search results, which have
+  no rank, were being folded into 20px. Same fix; search also got its own
+  result style rather than borrowing a chart list.
+- `.rule-head` only styled a heading *inside* it, but several pages put the
+  class *on* the `h2`. Those headings fell back to the browser default and came
+  out larger than the lead story.
+- `/dashboard` was not inside `.shell`, so it had no page gutter and ran to the
+  screen edge.
+
+**Verified** at 390, 768 and 1440 in both schemes: no horizontal overflow on any
+page, and the whole role-surface flow still passes end to end in dark mode.
+
+**Not done.** The enrolment screen shows the secret and an `otpauth://` link,
+not a QR code. The link enrols in one tap on a phone; on a desktop it means
+transcribing thirty-two characters. A QR needs an encoder, and hand-rolling
+Reed–Solomon for this is worse than either adding a reviewed dependency or
+waiting.

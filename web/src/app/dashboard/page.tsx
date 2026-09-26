@@ -40,7 +40,7 @@ export default async function DashboardPage() {
   const planned = PLANNED.filter((entry) => viewer.permissions.includes(entry.permission))
 
   return (
-    <div className="portal">
+    <div className="shell portal">
       <div className="pagehead">
         <p className="lbl">{surface.label}</p>
         <h1>{viewer.displayName}</h1>
