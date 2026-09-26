@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { homeSurface } from './session-server'
-import { safeNext } from '../../app/login/page'
+import { safeNext } from './redirect'
 
 describe('post-sign-in redirect', () => {
   it('keeps a site-relative path', () => {

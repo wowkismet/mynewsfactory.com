@@ -607,3 +607,39 @@ is a few indexed reads; it is not free at scale.
 publish, correction or withdrawal must be able to purge the pages it affects.
 Caching without that mechanism is what this decision is refusing, not caching
 itself.
+
+## D-023 — every credential form is `method="post"`, including the ones script submits
+
+**Decision.** Each form carrying a password, a TOTP code or a recovery code
+declares `method="post"`, and a test reads the source to keep it that way.
+
+**Why.** Found in a browser, not in review. A stale build left a chunk
+unloadable, the submit handler never attached, and the browser fell back to its
+default: a native GET. The password went into the URL — address bar, history,
+the referrer of the next request, and every access log between the browser and
+the origin. The form worked perfectly whenever JavaScript did, which is what
+made it invisible.
+
+The failure mode generalises: JavaScript blocked, a chunk 404 after a deploy,
+hydration not finished when someone hits return. In every one of them the
+fallback is a GET unless the markup says otherwise.
+
+**Why a source test rather than a rendering test.** What is being asserted is a
+property of the markup, not of the component. Mounting it would attach the
+handler and prove nothing about the browser that never ran one. The test was
+checked against a deliberately broken copy to confirm it fails.
+
+## D-024 — a privileged sign-in is routed to the second factor, not refused
+
+**Decision.** When login reports `mfaRequired`, the form sends the person to
+`/account/security`, carrying their intended destination, and returns them
+there once the factor is satisfied.
+
+**Why.** Before this, a correct password on a privileged account produced a
+message saying two-factor authentication was unavailable, and the person stayed
+on the sign-in page. That was true when it was written and stopped being true
+when the endpoints were built. An editor with the right password and the right
+role could not reach anything.
+
+`safeNext` moved to `lib/auth/redirect.ts` because two pages now validate a
+destination. Two validators means the weaker one becomes the way in.

@@ -66,7 +66,7 @@ export default function RegisterForm() {
   }
 
   return (
-    <form className="authform" onSubmit={(e) => {
+    <form className="authform" method="post" onSubmit={(e) => {
         // The handler's event type is inferred from JSX; React 19 no longer
         // ships a name for it, and annotating one is how that breaks.
         e.preventDefault()

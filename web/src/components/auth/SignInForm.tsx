@@ -9,6 +9,14 @@
  * those are server answers, and a client that guessed at them would be a
  * second, weaker copy of the rules.
  *
+ * Every form here is `method="post"` even though script submits it. Without
+ * that, a browser which has not run the handler -- JavaScript blocked, a chunk
+ * that failed to load, hydration not finished -- falls back to a native GET and
+ * puts each field in the query string: a password, a one-time code or a
+ * recovery code in the URL bar, in history, in the referrer, and in every
+ * access log between here and the server (§8, §57). POST puts them in a body
+ * that goes nowhere instead.
+ *
  * `router.refresh()` after success is what makes the header change. The server
  * components re-render with the cookie now set, so the viewer's name appears
  * without a full page load and without the client holding a copy of the
@@ -48,14 +56,13 @@ export default function SignInForm({ next }: { next: string }) {
     }
 
     if (result.data.mfaRequired) {
-      // Honest about the gap rather than sending them to a dashboard that will
-      // refuse every request: this account holds a privileged role, and the
-      // endpoint that accepts the second factor is not built yet (Phase 1d).
-      setMessage(
-        'This account requires two-factor authentication, which is not available yet. ' +
-          'Sign in with a reader account, or contact an administrator.',
-      )
-      setBusy(false)
+      // The password was accepted, but this account holds a privileged role
+      // and the session cannot act until a second factor is presented. Sending
+      // them on to `next` would land them on a surface that refuses every
+      // request, so they go to the page that resolves it, carrying where they
+      // were headed so they arrive there afterwards.
+      router.replace(`/account/security?next=${encodeURIComponent(next)}`)
+      router.refresh()
       return
     }
 
@@ -64,7 +71,7 @@ export default function SignInForm({ next }: { next: string }) {
   }
 
   return (
-    <form className="authform" onSubmit={(e) => {
+    <form className="authform" method="post" onSubmit={(e) => {
         // The handler's event type is inferred from JSX; React 19 no longer
         // ships a name for it, and annotating one is how that breaks.
         e.preventDefault()

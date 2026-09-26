@@ -19,6 +19,13 @@ import { money, pricing } from '@/lib/pricing'
  * them a phase, and a select that silently does nothing is the same lie in a
  * smaller font.
  */
+/** The role surfaces, most privileged last so they read left to right. */
+const DESKS = [
+  { permission: 'news.submit', href: '/desk', label: 'Desk' },
+  { permission: 'news.review', href: '/editorial', label: 'Editorial' },
+  { permission: 'users.read', href: '/admin', label: 'Admin' },
+]
+
 export async function TopBar() {
   const viewer = await currentViewer()
 
@@ -38,6 +45,12 @@ export async function TopBar() {
             </>
           ) : (
             <>
+              {/* Offered from live permissions, so a revoked role stops being
+                  offered on the next request. The desks re-check anyway --
+                  showing a link decides nothing. */}
+              {DESKS.filter((desk) => viewer.permissions.includes(desk.permission)).map((desk) => (
+                <Link href={desk.href} key={desk.href}>{desk.label}</Link>
+              ))}
               <Link href="/dashboard">{viewer.displayName}</Link>
               <SignOutButton className="linkbtn" />
             </>
