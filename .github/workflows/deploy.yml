@@ -23,7 +23,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  VPS_HOST: srv1936995.hstgr.cloud
+  # The IP, not srv1936995.hstgr.cloud. The hostname resolves to IPv6 while the
+  # site's A record is this address, and VPS_KNOWN_HOSTS pins whatever string
+  # is used here -- a mismatch fails host verification rather than falling
+  # back, which is the correct behaviour and an avoidable way to break a
+  # deploy. Regenerate the secret with:
+  #   ssh-keyscan -t ed25519 200.234.42.251
+  VPS_HOST: 200.234.42.251
   VPS_USER: root
   APP_DIR: /srv/mynewsfactory
   APP_PORT: '3100'
