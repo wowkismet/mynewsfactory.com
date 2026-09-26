@@ -1,9 +1,22 @@
 /**
- * Development and test seed (§81, docs/DECISIONS.md D-010).
+ * Bootstrap and seed (§81, docs/DECISIONS.md D-010, D-026).
  *
- * Inserts the demonstration fixtures. Refuses to run against a production
- * environment: a news platform serving invented articles under real reporter
- * names is an editorial integrity failure, not a placeholder.
+ * Two entry points, because two different things were being conflated:
+ *
+ *   `bootstrap` installs what every environment needs to function at all --
+ *   the role and permission catalogue, currencies, languages, countries,
+ *   cities and sections. None of it is invented: it is the reference data the
+ *   schema's foreign keys point at, and without it nobody can register,
+ *   because registration grants a role that would not exist.
+ *
+ *   `seed` adds the demonstration fixtures on top -- invented reporters and
+ *   invented articles -- and refuses to run in production. A news platform
+ *   serving fabricated stories under reporter names is an editorial integrity
+ *   failure, not a placeholder.
+ *
+ * Deploying used to call `seed`, which meant a production deploy either
+ * installed fiction or, once the guard was added, failed after migrating.
+ * `bootstrap` is what a deploy calls.
  */
 
 import { articles, categories, cities, reporters } from '../fixtures'
@@ -202,28 +215,49 @@ async function seedNews(tx: Db): Promise<void> {
   }
 }
 
-export interface SeedOptions {
-  /** Set only by tests that have constructed an isolated database. */
-  allowInProduction?: boolean
-}
-
-export async function seed(db: Db, options: SeedOptions = {}): Promise<void> {
-  if (process.env.NODE_ENV === 'production' && options.allowInProduction !== true) {
-    throw new Error(
-      'Refusing to seed demonstration content in production. ' +
-        'Production reads real editorial content; see docs/DECISIONS.md D-010.',
-    )
-  }
-
-  // Roles and permissions are not demonstration data: they are the
-  // authorization model, and every environment needs them. Synced first so a
-  // seeded account can be granted a role.
+/**
+ * Everything an environment needs before it can be used, and nothing invented.
+ *
+ * Safe in production and idempotent -- every statement is `ON CONFLICT DO
+ * NOTHING`, so re-running it on a live database changes nothing. A deploy
+ * runs this on every release so a newly added section or currency arrives
+ * without anyone logging in to insert it by hand.
+ */
+export async function bootstrap(db: Db): Promise<void> {
+  // The authorization model, not demonstration data. Synced first: an account
+  // cannot be granted a role that does not exist, so registration fails
+  // without this.
   await syncRoleCatalogue(db)
 
   await transaction(db, async (tx) => {
     await seedReference(tx)
     await seedCities(tx)
     await seedCategories(tx)
+  })
+}
+
+export interface SeedOptions {
+  /** Set only by tests that have constructed an isolated database. */
+  allowInProduction?: boolean
+}
+
+/**
+ * Bootstrap, plus the demonstration reporters and articles.
+ *
+ * Development and tests only. The guard is the point: the fixtures name
+ * reporters who do not exist and describe events that did not happen.
+ */
+export async function seed(db: Db, options: SeedOptions = {}): Promise<void> {
+  if (process.env.NODE_ENV === 'production' && options.allowInProduction !== true) {
+    throw new Error(
+      'Refusing to seed demonstration content in production. ' +
+        'Use `npm run db:bootstrap` for reference data; see docs/DECISIONS.md D-010.',
+    )
+  }
+
+  await bootstrap(db)
+
+  await transaction(db, async (tx) => {
     await seedReporters(tx)
     await seedNews(tx)
   })

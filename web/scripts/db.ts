@@ -1,5 +1,5 @@
 /**
- * Database CLI: `npm run db:migrate` and `npm run db:seed`.
+ * Database CLI: `npm run db:migrate`, `db:bootstrap` and `db:seed`.
  *
  * Run with Node's built-in TypeScript support -- no build step, no extra
  * dependency, and the same source the application uses rather than a
@@ -8,7 +8,7 @@
 
 import { closePool, db } from '../src/lib/db/pool.ts'
 import { migrate } from '../src/lib/db/migrate.ts'
-import { seed } from '../src/lib/db/seed.ts'
+import { bootstrap, seed } from '../src/lib/db/seed.ts'
 
 async function main(): Promise<void> {
   const command = process.argv[2] ?? ''
@@ -24,6 +24,12 @@ async function main(): Promise<void> {
       break
     }
 
+    case 'bootstrap': {
+      await bootstrap(db())
+      console.log('Reference data and the role catalogue are in place.')
+      break
+    }
+
     case 'seed': {
       await seed(db())
       console.log('Seeded demonstration content.')
@@ -31,7 +37,7 @@ async function main(): Promise<void> {
     }
 
     default:
-      console.error('Usage: npm run db:migrate | npm run db:seed')
+      console.error('Usage: npm run db:migrate | npm run db:bootstrap | npm run db:seed')
       process.exitCode = 1
   }
 }

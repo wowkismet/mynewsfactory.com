@@ -13,11 +13,9 @@ services:
     container_name: mynewsfactory-db
     restart: unless-stopped
 
-    # Opt-in. The portal does not read the database yet, so a plain
-    # `docker compose up -d` must not be blocked by it. Start PostgreSQL with:
-    #   docker compose --profile db up -d
-    profiles: ["db"]
-
+    # No longer opt-in. The portal reads the database on every page, so a
+    # `docker compose up -d` that skipped PostgreSQL would start a site that
+    # can only render its empty state.
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mynewsfactory}
       POSTGRES_USER: ${POSTGRES_USER:-mynewsfactory}
@@ -65,11 +63,24 @@ services:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://mynewsfactory.com}
-      # DATABASE_URL is deliberately absent: the pages still read fixtures.
-      # It returns, together with depends_on and the `db` profile becoming the
-      # default, in the commit that wires the repository into the routes.
-      # sslmode=disable will be correct there and only there -- the connection
-      # never leaves the container network (see web/src/lib/db/pool.ts).
+
+      # sslmode=disable is correct here and only here: the connection never
+      # leaves the compose network, and pool.ts requires TLS for anything else
+      # (web/src/lib/db/pool.ts).
+      DATABASE_URL: >-
+        postgres://${POSTGRES_USER:-mynewsfactory}:${POSTGRES_PASSWORD:-}@db:5432/${POSTGRES_DB:-mynewsfactory}?sslmode=disable
+
+      # Both come from .env, which deploy/provision-env.sh writes mode-600 on
+      # the server. They are never defaulted: a missing pepper must fail loudly
+      # at startup, not silently hash everything with an empty string.
+      AUTH_TOKEN_PEPPER: ${AUTH_TOKEN_PEPPER:-}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+
+    # The app fails its own health check without a database, so starting it
+    # before PostgreSQL is ready just means a restart loop at every deploy.
+    depends_on:
+      db:
+        condition: service_healthy
 
     # --- hardening ---
     security_opt:

@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
     "db:migrate": "node --import ./scripts/register.mjs scripts/db.ts migrate",
+    "db:bootstrap": "node --import ./scripts/register.mjs scripts/db.ts bootstrap",
     "db:seed": "node --import ./scripts/register.mjs scripts/db.ts seed",
     "layout:check": "node scripts/layout-check.mjs"
   },

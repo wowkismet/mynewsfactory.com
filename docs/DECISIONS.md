@@ -697,3 +697,56 @@ not a QR code. The link enrols in one tap on a phone; on a desktop it means
 transcribing thirty-two characters. A QR needs an encoder, and hand-rolling
 Reed–Solomon for this is worse than either adding a reviewed dependency or
 waiting.
+
+## D-026 — a deploy installs reference data, never demonstration content
+
+**Decision.** `bootstrap()` installs the role catalogue, currencies, languages,
+countries, cities and sections. `seed()` calls it and then adds the
+demonstration reporters and articles, and still refuses to run in production.
+Every deploy path calls `db:bootstrap`; none calls `db:seed`.
+
+**Why.** The two were the same function, and the production guard added later
+made that contradiction visible: `deploy/enable-logins.sh` ran `db:seed` inside
+a container with `NODE_ENV=production`, so it would have failed after
+migrating — a half-finished deploy with no roles installed.
+
+Skipping the seed entirely is not the fix either. Without the role catalogue
+nobody can register at all, because registration grants a role that would not
+exist; without sections the navigation is empty. That data is what the schema's
+foreign keys point at, and it is not invented.
+
+What is invented is the reporters and the articles. Those name people who do
+not exist and describe events that did not happen, and putting them on a live
+news site is the editorial integrity failure D-010 is about.
+
+**Bootstrap is idempotent** — every statement is `ON CONFLICT DO NOTHING` — so
+a deploy re-runs it on every release and a newly added section arrives without
+anyone logging in to insert it.
+
+## D-027 — the deploy workflow reports missing credentials instead of failing
+
+**Decision.** The CI deploy job is restored. A first job checks whether
+`VPS_SSH_KEY` and `VPS_KNOWN_HOSTS` exist; if either is absent it writes the
+setup instructions to the run summary and the deploy job is skipped.
+
+**Why.** The previous version of this workflow exited non-zero when the secret
+was missing. The secret was never added, so every commit was marked red for
+weeks, and the workflow was eventually deleted — leaving no automated path to
+production at all.
+
+Whether the repository has credentials is a fact about the repository, not a
+fault in the commit that triggered the run. A red mark that means "not
+configured yet" is indistinguishable from one that means "you broke the build",
+and the cost of that confusion was the whole pipeline.
+
+**What the deploy does** that the old one did not: runs migrations and
+`db:bootstrap` after the rebuild, and fails if `/api/v1/health` reports the
+database as down. A site that answers while its database does not would
+otherwise look like a successful deploy while every page rendered its empty
+state.
+
+**Unchanged:** `contents: read` only, `actions/checkout` pinned to a commit
+SHA, no third-party action anywhere near the key, the host key pinned through
+`VPS_KNOWN_HOSTS` rather than disabling host verification, the key removed in
+an `always()` step, and rareminting.com's health recorded before and after —
+a deploy that breaks the neighbouring site is a failed deploy.

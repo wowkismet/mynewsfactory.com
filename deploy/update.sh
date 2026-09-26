@@ -2,10 +2,9 @@
 #
 # Redeploy the current branch: pull, rebuild, migrate, prove it answers.
 #
-# For a site that is already running. The first-time setup -- keys, database,
-# seed -- is deploy/enable-logins.sh, which this deliberately does not repeat:
-# re-seeding a live site would put demonstration stories back next to real
-# ones.
+# The manual equivalent of the CI deploy workflow. Reference data is installed
+# on every run because it is idempotent and a new section or currency should
+# not need a person. Demonstration content is never installed here.
 #
 # Run it on the VPS from the repository root.
 #
@@ -17,10 +16,8 @@ BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
-if [ ! -f .env ]; then
-  echo "No .env here. Run deploy/enable-logins.sh first." >&2
-  exit 1
-fi
+say "Checking secrets"
+bash deploy/provision-env.sh
 
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
@@ -35,26 +32,33 @@ git reset --hard "origin/${BRANCH}"
 echo "Now on $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
 
 say "Rebuilding"
-docker compose up -d --build web
+docker compose up -d --build
 
-DB_USER="${POSTGRES_USER:-mynewsfactory}"
-DB_NAME="${POSTGRES_DB:-mynewsfactory}"
-DB_URL="postgres://${DB_USER}:${POSTGRES_PASSWORD}@db:5432/${DB_NAME}"
+say "Applying migrations"
+docker compose exec -T web npm run db:migrate
 
-say "Applying any new migrations"
-docker compose exec -T -e DATABASE_URL="${DB_URL}" web npm run db:migrate
+say "Installing reference data"
+docker compose exec -T web npm run db:bootstrap
 
 say "Checking"
 ok=1
 printf '  health: '
-curl -fsS http://127.0.0.1:3100/api/v1/health || { echo 'FAILED'; ok=0; }
-echo
+health=$(curl -fsS --max-time 10 http://127.0.0.1:3100/api/v1/health) || { echo 'FAILED'; ok=0; }
+echo "${health:-}"
 printf '  news:   '
-curl -fsS 'http://127.0.0.1:3100/api/v1/news?limit=1' | head -c 90 || { echo 'FAILED'; ok=0; }
+curl -fsS --max-time 10 'http://127.0.0.1:3100/api/v1/news?limit=1' | head -c 90 || { echo 'FAILED'; ok=0; }
 echo
 
+# The site answering while its database does not is the case worth catching:
+# every page would render its empty state and this would still look like a
+# successful deploy.
+case "${health:-}" in
+  *'"database":"up"'*) ;;
+  *) echo "  the app is up but cannot reach the database"; ok=0 ;;
+esac
+
 if [ "${ok}" -ne 1 ]; then
-  say "The site did not answer. Recent logs:"
+  say "The site did not come up cleanly. Recent logs:"
   docker compose logs --tail 60 web
   exit 1
 fi
