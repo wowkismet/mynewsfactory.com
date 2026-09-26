@@ -520,3 +520,69 @@ into the phase that was meant to expose the existing layers. Nothing until
 configured numbers must be revisited, not merely re-pointed, when the counter
 moves to Redis. The limiter sweeps expired windows on a fraction of writes
 rather than on a timer, so it holds no process-lifetime state.
+
+---
+
+## D-020 — The CSP carries a per-request nonce, set in middleware
+
+**Date:** 2026-09-26
+
+**Decision.** `Content-Security-Policy` moves out of `next.config.mjs` and into
+`src/middleware.ts`, which mints a nonce per request and sets the header on
+both the request and the response. `script-src` is
+`'self' 'nonce-…' 'strict-dynamic'`.
+
+**Reason.** The static header said `script-src 'self'`, which blocks the inline
+bootstrap scripts the App Router emits. React therefore never hydrated —
+anywhere, in production, since the header was added. Nothing caught it because
+every page was server-rendered static HTML: the site looked correct and was
+entirely inert. The first interactive component added would have failed
+mysteriously, and it did.
+
+The nonce is the fix rather than `'unsafe-inline'`, which would also have made
+the forms work while permitting exactly the injected `<script>` the policy
+exists to stop. A static header cannot express a per-request value, so the
+header cannot be static.
+
+**Alternatives.** `'unsafe-inline'` — trades the whole protection for a config
+line. Hashing the framework's inline scripts — they change with every Next
+release, so the policy would break on upgrade instead of at runtime.
+
+**Impact.** Middleware now runs on every non-asset request, which is a small
+per-request cost the matcher keeps off static files. `style-src` still needs
+`'unsafe-inline'`: the framework emits inline style attributes and there is no
+nonce path for them. That is the weaker half of the policy and is written down
+rather than left implied — an injected style is defacement, not execution.
+
+---
+
+## D-021 — Session-aware chrome makes every page dynamic, for now
+
+**Date:** 2026-09-26
+
+**Decision.** The utility bar reads the session in a server component, so the
+root layout calls `cookies()` and every route is rendered per request. Four
+routes that were prerendered — the front page, category, city and article
+pages — are no longer static.
+
+**Reason.** The bar previously showed a hard-coded "Rahul Sharma · Premium
+member" to every visitor, which is the fake UI the specification prohibits. The
+options were to render real state on the server, or to fetch it in the browser
+and keep the pages static.
+
+Server rendering was chosen because the alternative shows every signed-in
+reader a "Sign in" link for as long as the fetch takes, on every page, and adds
+a request per page view for readers who are not signed in at all. With one
+container and no CDN in front of it, the cost of dynamic rendering today is
+small and measurable; the cost of the flash is paid by every user on every
+page.
+
+**Alternatives.** A non-HttpOnly hint cookie holding the display name — removes
+both the flash and the fetch, and adds a second source of truth that can
+disagree with the session. Partial prerendering — the right answer, still
+experimental in this version.
+
+**Impact.** This must be revisited with the caching work in §65, where article
+pages want to be served from a CDN and personalised chrome cannot be baked
+into them. Recorded as a known regression rather than discovered later as a
+mystery in the traffic figures.

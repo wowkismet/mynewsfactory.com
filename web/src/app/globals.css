@@ -520,3 +520,78 @@ img { max-width: 100%; display: block; }
 .duty .t { font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .duty .meta { font-size: 10.5px; }
 .duty .tick { color: var(--teal); font-size: 9.5px; }
+
+/* ---------- accounts (§5, §31) ----------
+   The sign-in, registration and account surfaces. Deliberately narrow: a form
+   is easier to complete in one column, and a reader arriving here has come to
+   do one thing. */
+
+.authpage {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-block: 28px 56px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 34px;
+  align-items: start;
+}
+
+.authcard { background: var(--surface); border: 1px solid var(--rule); padding: 22px 24px 26px; }
+.authcard .pagehead { padding-block: 0 14px; margin-bottom: 18px; }
+.authcard h1 { font-size: 30px; margin: 4px 0 0; }
+
+.authform { display: grid; gap: 16px; }
+
+.field { display: grid; gap: 5px; }
+.field input {
+  font: inherit;
+  font-size: 15px;
+  padding: 10px 11px;
+  border: 1px solid var(--rule);
+  background: var(--surface-hi);
+  color: var(--ink);
+  border-radius: 2px;
+}
+/* A visible focus ring is not decoration: it is how anyone navigating by
+   keyboard knows where they are (§76). */
+.field input:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.fielderr { font-family: var(--mono); font-size: 11.5px; color: var(--red-dp); }
+
+.btn--wide { width: 100%; justify-content: center; text-align: center; padding-block: 11px; }
+.btn[disabled] { opacity: .6; cursor: progress; }
+
+.authnote { padding: 12px 14px; border: 1px solid var(--rule); font-size: 14px; }
+.authnote--bad { border-color: var(--red-lt); background: #fdf1ef; color: var(--red-dp); }
+.authnote--ok  { background: var(--tint); display: grid; gap: 9px; }
+
+.authalt { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 14px; }
+
+.authaside { background: var(--tint); border: 1px solid var(--rule); padding: 18px 18px 20px; }
+.authaside h2 { margin: 0 0 10px; }
+
+/* A button that reads as a link. Used where the action changes state and so
+   must not be an anchor, but belongs visually in a row of links. */
+.linkbtn {
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer; text-decoration: underline;
+}
+.linkbtn:disabled { cursor: progress; opacity: .7; }
+
+.dashgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+.dashwide { grid-column: 1 / -1; }
+.dashactions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule); }
+
+.factlist { margin: 10px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; }
+.factlist dt { font-family: var(--mono); font-size: 11px; color: var(--ink4); text-transform: uppercase; letter-spacing: .04em; }
+.factlist dd { margin: 0; font-size: 14px; word-break: break-word; }
+
+@media (max-width: 900px) {
+  /* The aside is context, not instruction: below the form on a phone. */
+  .authpage { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+}

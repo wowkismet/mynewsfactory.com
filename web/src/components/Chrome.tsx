@@ -1,23 +1,47 @@
 import Link from 'next/link'
 import Clock from './Clock'
+import SignOutButton from './auth/SignOutButton'
+import { currentViewer } from '@/lib/auth/session-server'
 import { getCategories } from '@/lib/content'
 import { money, pricing } from '@/lib/pricing'
 
-export function TopBar() {
+/**
+ * The utility bar.
+ *
+ * This showed a signed-in "Rahul Sharma · Premium member" and an alert count
+ * of five to every visitor, signed in or not. That is the fake UI the
+ * specification prohibits: it described a state the system could not be in,
+ * and it would have gone on describing it after real accounts existed.
+ *
+ * It now reads the session. An anonymous reader is offered sign-in; a signed-in
+ * one sees their own name. The locale and currency controls are still inert
+ * and are marked as such rather than left looking operable -- §71 and §72 give
+ * them a phase, and a select that silently does nothing is the same lie in a
+ * smaller font.
+ */
+export async function TopBar() {
+  const viewer = await currentViewer()
+
   return (
     <div className="utility">
       <div className="shell">
         <ul className="lbl">
-          <li><a href="#">Global ▾</a></li>
-          <li><a href="#">EN ▾</a></li>
-          <li><a href="#">INR ₹ ▾</a></li>
-          <li><span className="alerts">Alerts<span className="count">5</span></span></li>
+          <li><span aria-disabled="true" title="Region selection arrives with §72">Global</span></li>
+          <li><span aria-disabled="true" title="Languages arrive with §71">EN</span></li>
+          <li><span aria-disabled="true" title="Currencies arrive with §72">INR ₹</span></li>
         </ul>
         <div className="who lbl">
-          <span>Rahul Sharma</span>
-          <span className="prem">Premium member</span>
-          <a href="#">Log in</a>
-          <a href="#">Sign up</a>
+          {viewer === null ? (
+            <>
+              <Link href="/login">Sign in</Link>
+              <Link href="/register">Create account</Link>
+            </>
+          ) : (
+            <>
+              <Link href="/dashboard">{viewer.displayName}</Link>
+              <SignOutButton className="linkbtn" />
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -42,8 +66,11 @@ export function Masthead() {
             <input id="q" name="q" type="search" placeholder="Search news, cities, reporters" />
           </form>
           <div className="mast-btns">
-            <a className="btn btn--red" href="#report">Report now</a>
-            <a className="btn" href="#become">Become a reporter</a>
+            {/* Both pointed at anchors that did not exist. Reporter submission
+                and the academy are Phase 3; until then the honest destination
+                for both is the account that either one starts from. */}
+            <Link className="btn btn--red" href="/register">Report now</Link>
+            <Link className="btn" href="/register">Become a reporter</Link>
           </div>
         </div>
       </div>
