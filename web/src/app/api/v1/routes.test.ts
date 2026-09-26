@@ -49,6 +49,12 @@ const { POST: postLogin } = await import('./auth/login/route')
 const { POST: postLogout } = await import('./auth/logout/route')
 const { POST: postRefresh } = await import('./auth/refresh/route')
 const { GET: getSession } = await import('./auth/session/route')
+const { GET: getMfa } = await import('./auth/mfa/route')
+const { POST: postMfaEnrol } = await import('./auth/mfa/enrol/route')
+const { POST: postMfaConfirm } = await import('./auth/mfa/confirm/route')
+const { POST: postMfaVerify } = await import('./auth/mfa/verify/route')
+
+const { totp } = await import('@/lib/auth/totp')
 
 const ORIGIN = 'https://mynewsfactory.com'
 const PASSWORD = 'a-sufficiently-long-password'
@@ -755,5 +761,210 @@ describe('refresh', () => {
       build('POST', '/api/v1/auth/refresh', { cookies: { '__Host-mnf_rt': session.refreshToken } }),
     )
     expect(proper.status).toBe(200)
+  })
+})
+
+// --------------------------------------------------------------------- MFA
+
+/** Next.js hands route params as a promise; these tests must do the same. */
+function withParams(params: Record<string, string>): { params: Promise<Record<string, string>> } {
+  return { params: Promise.resolve(params) }
+}
+
+/** Signs in and takes the session all the way through TOTP enrolment. */
+async function signInWithMfa(roleKey: string): Promise<SignedIn & { recoveryCodes: string[] }> {
+  const session = await signIn(roleKey)
+  const cookies = { '__Host-mnf_at': session.accessToken }
+
+  const offer = await read(
+    await postMfaEnrol(build('POST', '/api/v1/auth/mfa/enrol', { body: {}, cookies })),
+  )
+  const secret = offer.data?.secret
+  if (typeof secret !== 'string') throw new Error('enrolment returned no secret')
+
+  const confirmed = await postMfaConfirm(
+    build('POST', '/api/v1/auth/mfa/confirm', {
+      body: { code: totp(secret, Date.now()) },
+      cookies,
+    }),
+  )
+  expect(confirmed.status).toBe(200)
+
+  const body = await read(confirmed)
+  return { ...session, recoveryCodes: (body.data?.recoveryCodes as string[] | undefined) ?? [] }
+}
+
+describe('second factor', () => {
+  it('refuses a privileged session that has not presented a code', async () => {
+    const session = await signIn('EDITOR')
+
+    const response = await getSession(
+      build('GET', '/api/v1/auth/session', { cookies: { '__Host-mnf_at': session.accessToken } }),
+    )
+
+    expect((await read(response)).error?.code).toBe('MFA_REQUIRED')
+  })
+
+  it('lets an unprivileged account act with no second factor at all', async () => {
+    const session = await signIn('READER')
+    const response = await getSession(
+      build('GET', '/api/v1/auth/session', { cookies: { '__Host-mnf_at': session.accessToken } }),
+    )
+    expect(response.status).toBe(200)
+  })
+
+  it('reports enrolment state without requiring the factor it is reporting on', async () => {
+    const session = await signIn('EDITOR')
+    const body = await read(
+      await getMfa(
+        build('GET', '/api/v1/auth/mfa', { cookies: { '__Host-mnf_at': session.accessToken } }),
+      ),
+    )
+
+    expect(body.data?.required).toBe(true)
+    expect(body.data?.satisfied).toBe(false)
+    expect(body.data?.enrolled).toBe(false)
+  })
+
+  it('issues a secret and an otpauth URI carrying it', async () => {
+    const session = await signIn('EDITOR')
+    const body = await read(
+      await postMfaEnrol(
+        build('POST', '/api/v1/auth/mfa/enrol', {
+          body: {},
+          cookies: { '__Host-mnf_at': session.accessToken },
+        }),
+      ),
+    )
+
+    const secret = body.data?.secret as string
+    expect(secret.length).toBeGreaterThan(15)
+    expect(body.data?.otpauthUri as string).toContain(`secret=${secret}`)
+  })
+
+  it('refuses a wrong code and does not satisfy the session', async () => {
+    const session = await signIn('EDITOR')
+    const cookies = { '__Host-mnf_at': session.accessToken }
+
+    await postMfaEnrol(build('POST', '/api/v1/auth/mfa/enrol', { body: {}, cookies }))
+
+    const response = await postMfaConfirm(
+      build('POST', '/api/v1/auth/mfa/confirm', { body: { code: '000000' }, cookies }),
+    )
+    expect(response.status).toBe(401)
+
+    const status = await read(
+      await getMfa(build('GET', '/api/v1/auth/mfa', { cookies })),
+    )
+    expect(status.data?.satisfied).toBe(false)
+    expect(status.data?.confirmed).toBe(false)
+  })
+
+  it('confirms with a real code, issues recovery codes, and unblocks the session', async () => {
+    const session = await signInWithMfa('EDITOR')
+    expect(session.recoveryCodes.length).toBe(10)
+
+    const status = await read(
+      await getMfa(
+        build('GET', '/api/v1/auth/mfa', { cookies: { '__Host-mnf_at': session.accessToken } }),
+      ),
+    )
+    expect(status.data?.satisfied).toBe(true)
+    expect(status.data?.confirmed).toBe(true)
+  })
+
+  it('refuses to re-enrol over a confirmed credential', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const response = await postMfaEnrol(
+      build('POST', '/api/v1/auth/mfa/enrol', {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+    )
+    expect(response.status).toBe(409)
+  })
+
+  it('refuses to replay a code that has already been accepted', async () => {
+    const session = await signIn('EDITOR')
+    const cookies = { '__Host-mnf_at': session.accessToken }
+
+    const offer = await read(
+      await postMfaEnrol(build('POST', '/api/v1/auth/mfa/enrol', { body: {}, cookies })),
+    )
+    const code = totp(offer.data?.secret as string, Date.now())
+
+    expect(
+      (await postMfaConfirm(build('POST', '/api/v1/auth/mfa/confirm', { body: { code }, cookies })))
+        .status,
+    ).toBe(200)
+
+    // The same code, still inside its thirty-second window.
+    expect(
+      (await postMfaVerify(build('POST', '/api/v1/auth/mfa/verify', { body: { code }, cookies })))
+        .status,
+    ).toBe(401)
+  })
+
+  it('does not satisfy a different session of the same account', async () => {
+    const first = await signInWithMfa('EDITOR')
+
+    // A second sign-in for the same person: the factor is per session.
+    const response = await postLogin(
+      build('POST', '/api/v1/auth/login', { body: { email: first.email, password: PASSWORD } }),
+    )
+    const secondToken = cookieFrom(response, '__Host-mnf_at')
+
+    const status = await read(
+      await getMfa(build('GET', '/api/v1/auth/mfa', { cookies: { '__Host-mnf_at': secondToken ?? '' } })),
+    )
+    expect(status.data?.satisfied).toBe(false)
+  })
+
+  it('accepts a recovery code once and never again', async () => {
+    const first = await signInWithMfa('EDITOR')
+    const spare = first.recoveryCodes[0] ?? ''
+
+    const second = await postLogin(
+      build('POST', '/api/v1/auth/login', { body: { email: first.email, password: PASSWORD } }),
+    )
+    const cookies = { '__Host-mnf_at': cookieFrom(second, '__Host-mnf_at') ?? '' }
+
+    const used = await read(
+      await postMfaVerify(
+        build('POST', '/api/v1/auth/mfa/verify', { body: { recoveryCode: spare }, cookies }),
+      ),
+    )
+    expect(used.data?.satisfied).toBe(true)
+    expect(used.data?.recoveryCodesRemaining).toBe(9)
+
+    const third = await postLogin(
+      build('POST', '/api/v1/auth/login', { body: { email: first.email, password: PASSWORD } }),
+    )
+    const replay = await postMfaVerify(
+      build('POST', '/api/v1/auth/mfa/verify', {
+        body: { recoveryCode: spare },
+        cookies: { '__Host-mnf_at': cookieFrom(third, '__Host-mnf_at') ?? '' },
+      }),
+    )
+    expect(replay.status).toBe(401)
+  })
+
+  it('refuses a request offering a code and a recovery code together', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const response = await postMfaVerify(
+      build('POST', '/api/v1/auth/mfa/verify', {
+        body: { code: '123456', recoveryCode: 'ABCDE-FGHJK' },
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+    )
+    expect(response.status).toBe(400)
+  })
+
+  it('refuses an unauthenticated caller', async () => {
+    expect((await getMfa(build('GET', '/api/v1/auth/mfa'))).status).toBe(401)
+    expect(
+      (await postMfaVerify(build('POST', '/api/v1/auth/mfa/verify', { body: { code: '123456' } })))
+        .status,
+    ).toBe(401)
   })
 })

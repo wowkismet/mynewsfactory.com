@@ -61,6 +61,16 @@ export interface RouteSpec<BodyShape extends Shape, QueryShape extends Shape, Pa
   rateLimit?: RateLimitRule
   body?: BodyShape
   query?: QueryShape
+  /**
+   * Set only by the endpoints that exist to satisfy the second factor.
+   *
+   * The MFA gate below refuses a privileged session that has not cleared a
+   * code -- which would include the endpoint the caller uses to clear one, so
+   * those would be unreachable by exactly the accounts that need them. The
+   * opt-out is named rather than inferred so that adding it to anything else
+   * is a visible decision in a diff (§7).
+   */
+  allowWithoutMfa?: boolean
   permission?: {
     key: string
     /** Which scope the caller is asking to act in. Omitted means unscoped. */
@@ -234,7 +244,12 @@ export function route<BodyShape extends Shape, QueryShape extends Shape, Payload
       }
 
       // A privileged grant without a second factor is not a usable session (§7).
-      if (actor !== null && actor.mfaRequired && !actor.mfaSatisfied) {
+      if (
+        spec.allowWithoutMfa !== true &&
+        actor !== null &&
+        actor.mfaRequired &&
+        !actor.mfaSatisfied
+      ) {
         throw new ApiProblem('MFA_REQUIRED', 'This account requires two-factor authentication.')
       }
 

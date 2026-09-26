@@ -209,6 +209,23 @@ export async function findSessionByAccessToken(
   }
 }
 
+/**
+ * Marks this session as having cleared a second factor (§7).
+ *
+ * Per session, not per account: a second device signing in later has not
+ * proven anything, and must present a code of its own. `COALESCE` keeps the
+ * first time it was satisfied, so the timestamp answers "when did this session
+ * become privileged" rather than "when was a code last typed".
+ */
+export async function markSessionMfaSatisfied(db: Db, sessionId: string): Promise<void> {
+  await db.query(
+    `UPDATE sessions
+        SET mfa_satisfied_at = COALESCE(mfa_satisfied_at, now())
+      WHERE id = $1 AND revoked_at IS NULL`,
+    [sessionId],
+  )
+}
+
 export async function revokeSession(db: Db, sessionId: string, reason: string): Promise<void> {
   if (reason === '') throw new Error('A revocation must carry a reason')
 
