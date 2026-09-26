@@ -53,6 +53,9 @@ const { GET: getMfa } = await import('./auth/mfa/route')
 const { POST: postMfaEnrol } = await import('./auth/mfa/enrol/route')
 const { POST: postMfaConfirm } = await import('./auth/mfa/confirm/route')
 const { POST: postMfaVerify } = await import('./auth/mfa/verify/route')
+const { POST: postPublish } = await import('./news/[slug]/publish/route')
+const { POST: postUnpublish } = await import('./news/[slug]/unpublish/route')
+const { POST: postReview } = await import('./news/[slug]/review/route')
 
 const { totp } = await import('@/lib/auth/totp')
 
@@ -795,11 +798,15 @@ async function signInWithMfa(roleKey: string): Promise<SignedIn & { recoveryCode
 }
 
 describe('second factor', () => {
-  it('refuses a privileged session that has not presented a code', async () => {
+  it('refuses every privileged action until a code is presented', async () => {
     const session = await signIn('EDITOR')
 
-    const response = await getSession(
-      build('GET', '/api/v1/auth/session', { cookies: { '__Host-mnf_at': session.accessToken } }),
+    const response = await postPublish(
+      build('POST', '/api/v1/news/x/publish', {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug: 'x' }),
     )
 
     expect((await read(response)).error?.code).toBe('MFA_REQUIRED')
@@ -966,5 +973,249 @@ describe('second factor', () => {
       (await postMfaVerify(build('POST', '/api/v1/auth/mfa/verify', { body: { code: '123456' } })))
         .status,
     ).toBe(401)
+  })
+})
+
+// --------------------------------------------------------------- editorial
+
+describe('editorial transitions', () => {
+  /** A fresh unpublished story, so each test owns the row it moves. */
+  async function draft(slug: string, status = 'EDITOR_REVIEW'): Promise<string> {
+    await db.query(
+      `INSERT INTO news (slug, category_id, reporter_id, kicker, title, standfirst, status, read_minutes)
+       SELECT $1, cat.id, rep.id, 'Desk', $2, 'Filed for the desk', $3::news_status, 3
+         FROM categories cat, reporters rep
+        WHERE cat.slug = 'business' AND rep.slug = 'a-deshmukh'`,
+      [slug, `Desk story ${slug}`, status],
+    )
+    return slug
+  }
+
+  async function statusOf(slug: string): Promise<string | undefined> {
+    const { rows } = await db.query<{ status: string }>(
+      'SELECT status FROM news WHERE slug = $1',
+      [slug],
+    )
+    return rows[0]?.status
+  }
+
+  it('publishes for an editor who has cleared the second factor', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const slug = await draft('editorial-publishes-ok')
+
+    const response = await postPublish(
+      build('POST', `/api/v1/news/${slug}/publish`, {
+        body: { note: 'Cleared' },
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(200)
+    expect((await read(response)).data?.to).toBe('PUBLISHED')
+    expect(await statusOf(slug)).toBe('PUBLISHED')
+  })
+
+  it('refuses a reader outright and leaves the story alone', async () => {
+    const session = await signIn('READER')
+    const slug = await draft('editorial-reader-denied')
+
+    const response = await postPublish(
+      build('POST', `/api/v1/news/${slug}/publish`, {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await statusOf(slug)).toBe('EDITOR_REVIEW')
+  })
+
+  it('refuses a reporter, who may submit but not publish', async () => {
+    const session = await signIn('VERIFIED_REPORTER')
+    const slug = await draft('editorial-reporter-denied')
+
+    const response = await postPublish(
+      build('POST', `/api/v1/news/${slug}/publish`, {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await statusOf(slug)).toBe('EDITOR_REVIEW')
+  })
+
+  it('refuses an anonymous caller', async () => {
+    const slug = await draft('editorial-anon-denied')
+    const response = await postPublish(
+      build('POST', `/api/v1/news/${slug}/publish`, { body: {} }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(401)
+    expect(await statusOf(slug)).toBe('EDITOR_REVIEW')
+  })
+
+  it('refuses a cookie-authenticated request from another origin', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const slug = await draft('editorial-csrf-denied')
+
+    const response = await postPublish(
+      build('POST', `/api/v1/news/${slug}/publish`, {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+        origin: 'https://attacker.example',
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await statusOf(slug)).toBe('EDITOR_REVIEW')
+  })
+
+  it('will not publish through the review endpoint', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const slug = await draft('editorial-review-cannot-publish')
+
+    const response = await postReview(
+      build('POST', `/api/v1/news/${slug}/review`, {
+        body: { to: 'PUBLISHED' },
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(400)
+    expect(await statusOf(slug)).toBe('EDITOR_REVIEW')
+  })
+
+  it('moves a story between review statuses', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const slug = await draft('editorial-review-moves', 'SUBMITTED')
+
+    const response = await postReview(
+      build('POST', `/api/v1/news/${slug}/review`, {
+        body: { to: 'FACT_CHECK' },
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await statusOf(slug)).toBe('FACT_CHECK')
+  })
+
+  it('reports a conflict rather than success when nothing would change', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const slug = await draft('editorial-no-change', 'APPROVED')
+
+    const response = await postReview(
+      build('POST', `/api/v1/news/${slug}/review`, {
+        body: { to: 'APPROVED' },
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(409)
+  })
+
+  it('returns 404 for a story that does not exist, without saying more', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const response = await postPublish(
+      build('POST', '/api/v1/news/never-written/publish', {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug: 'never-written' }),
+    )
+
+    expect(response.status).toBe(404)
+  })
+
+  it('refuses a slug the column could never hold', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const response = await postPublish(
+      build('POST', '/api/v1/news/..%2F..%2Fetc/publish', {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug: '../../etc/passwd' }),
+    )
+
+    expect(response.status).toBe(404)
+  })
+
+  it('unpublishes, clearing the timestamp the CHECK constraint guards', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const slug = await draft('editorial-unpublish')
+
+    await postPublish(
+      build('POST', `/api/v1/news/${slug}/publish`, {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    const response = await postUnpublish(
+      build('POST', `/api/v1/news/${slug}/unpublish`, {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await statusOf(slug)).toBe('UNPUBLISHED')
+
+    const { rows } = await db.query<{ published_at: string | null }>(
+      'SELECT published_at FROM news WHERE slug = $1',
+      [slug],
+    )
+    expect(rows[0]?.published_at).toBeNull()
+  })
+
+  it('records who published, under the role that carried the permission', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const slug = await draft('editorial-audited')
+
+    await postPublish(
+      build('POST', `/api/v1/news/${slug}/publish`, {
+        body: {},
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug }),
+    )
+
+    const { rows } = await db.query<{ actor_id: string; actor_role: string; action: string }>(
+      `SELECT actor_id, actor_role, action FROM audit_events
+        WHERE resource_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [slug],
+    )
+
+    expect(rows[0]?.action).toBe('NEWS_PUBLISHED')
+    expect(rows[0]?.actor_id).toBe(session.userId)
+    expect(rows[0]?.actor_role).toBe('EDITOR')
+  })
+
+  it('does not accept the story being named in the body instead of the path', async () => {
+    const session = await signInWithMfa('EDITOR')
+    const target = await draft('editorial-tamper-target')
+
+    const response = await postPublish(
+      build('POST', '/api/v1/news/never-written/publish', {
+        body: { slug: target },
+        cookies: { '__Host-mnf_at': session.accessToken },
+      }),
+      withParams({ slug: 'never-written' }),
+    )
+
+    // Rejected as an unknown field, and the story it named is untouched.
+    expect(response.status).toBe(400)
+    expect(await statusOf(target)).toBe('EDITOR_REVIEW')
   })
 })
