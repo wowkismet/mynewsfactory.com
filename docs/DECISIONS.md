@@ -586,3 +586,24 @@ experimental in this version.
 pages want to be served from a CDN and personalised chrome cannot be baked
 into them. Recorded as a known regression rather than discovered later as a
 mystery in the traffic figures.
+
+## D-022 — the public pages render per request, not at build time
+
+**Decision.** `/`, `/category/[slug]`, `/city/[slug]` and `/news/[slug]` are
+`force-dynamic`. `generateStaticParams` has been removed from the three that
+had it.
+
+**Why.** They were prerendered from the fixtures, which was correct while the
+content was a file that only changed when someone committed. It stopped being
+correct the moment an editor could publish, correct and withdraw a story: a
+page baked at build time keeps serving a story after it has been unpublished,
+and keeps serving the pre-correction text after a correction. A withdrawal
+that does not take effect is a safety failure, not a caching trade-off.
+
+**What it costs.** Every request touches PostgreSQL. At current volumes that
+is a few indexed reads; it is not free at scale.
+
+**When to revisit.** §65, with the cache invalidation to go with it — a
+publish, correction or withdrawal must be able to purge the pages it affects.
+Caching without that mechanism is what this decision is refusing, not caching
+itself.

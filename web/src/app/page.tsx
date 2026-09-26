@@ -26,6 +26,32 @@ export default async function HomePage() {
   const secondary = rest.slice(0, 2)
   const top = rest.slice(2, 10)
 
+  // An empty newsroom is a real state: a fresh install before the first story
+  // is published, or a database the site cannot reach. Saying so beats
+  // rendering the full page furniture around nothing, which looks like the
+  // site is broken in some way nobody can name.
+  if (all.length === 0) {
+    return (
+      <div className="shell portal">
+        <section className="band">
+          <div className="pagehead">
+            <div className="lbl" style={{ color: 'var(--red)' }}>Newsroom</div>
+            <h1>No published stories yet</h1>
+            <p>
+              Nothing has been published, or the newsroom database is not reachable from
+              this server. Nothing is being withheld and nothing is cached — this page
+              shows what the database returned.
+            </p>
+          </div>
+          <p className="empty">
+            <Link href="/register">Create an account</Link> to file a report, or{' '}
+            <Link href="/login">sign in</Link> if you already have one.
+          </p>
+        </section>
+      </div>
+    )
+  }
+
   return (
     <div className="shell portal">
       <div className="grid4">

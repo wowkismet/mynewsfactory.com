@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Artwork } from './Artwork'
-import type { Article, Reporter } from '@/lib/types'
+import type { ArticleSummary, Reporter } from '@/lib/types'
 import { getReporter } from '@/lib/content'
 
 /** Compact relative time, e.g. "12 min ago", "3 h ago", "2 d ago". */
@@ -27,7 +27,7 @@ export function Byline({ reporter }: { reporter: Reporter }) {
   )
 }
 
-export async function HeroStory({ article }: { article: Article }) {
+export async function HeroStory({ article }: { article: ArticleSummary }) {
   const reporter = await getReporter(article.reporterSlug)
   return (
     <article className="hero">
@@ -51,7 +51,7 @@ export async function HeroStory({ article }: { article: Article }) {
   )
 }
 
-export async function StoryCard({ article }: { article: Article }) {
+export async function StoryCard({ article }: { article: ArticleSummary }) {
   const reporter = await getReporter(article.reporterSlug)
   return (
     <article className="card">
@@ -71,7 +71,7 @@ export async function StoryCard({ article }: { article: Article }) {
   )
 }
 
-export function RailItem({ article }: { article: Article }) {
+export function RailItem({ article }: { article: ArticleSummary }) {
   return (
     <Link className="item" href={`/news/${article.slug}`}>
       <span className="thumb">

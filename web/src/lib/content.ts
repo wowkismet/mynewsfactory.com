@@ -1,73 +1,122 @@
 /**
- * Editorial content accessors.
+ * Editorial content accessors for the rendered pages (§10, §42).
  *
- * Still backed by fixtures. The database repository that replaces them lives in
- * `db/repository.ts` and is already tested against real PostgreSQL; rewiring
- * these call sites is the next step of Phase 1a.
+ * These read PostgreSQL. They used to read `fixtures.ts`, and the swap is the
+ * point: what the portal shows is now what the newsroom published, not a file
+ * checked into the repository.
+ *
+ * Every accessor degrades rather than throws. A page that cannot reach the
+ * database renders its empty state and says so; it does not fall back to the
+ * fixtures. Serving invented stories under real reporter names because the
+ * database is down is the §89 failure -- mock data presented as production
+ * data -- and it is worse than an empty page, because nobody finds out.
+ *
+ * The fixtures remain, used only by `db/seed.ts` for development and tests.
  */
 
-import type { Article, Category, City, Reporter } from './types'
-import { articles, categories, cities, reporters } from './fixtures'
+import type { Article, ArticleSummary, Category, City, Reporter } from './types'
+import {
+  findArticle,
+  findCategory,
+  findCity,
+  findLead,
+  findRelated,
+  findReporter,
+  listCategories,
+  listCities,
+  listPublished,
+} from './db/repository'
+import type { Db } from './db/client'
+import { db } from './db/pool'
 
-const byNewest = (a: Article, b: Article) =>
-  new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+/**
+ * Runs a read, returning `fallback` if the database cannot answer.
+ *
+ * The failure is logged with the accessor's name so an operator sees which
+ * read failed, while the page gets a value it can render. A missing
+ * DATABASE_URL reaches here as a thrown error from `db()`, which is the
+ * not-yet-provisioned case rather than a fault.
+ */
+async function read<T>(name: string, fallback: T, work: (handle: Db) => Promise<T>): Promise<T> {
+  try {
+    return await work(db())
+  } catch (error) {
+    console.error('[content] read failed', {
+      accessor: name,
+      detail: error instanceof Error ? error.message : String(error),
+    })
+    return fallback
+  }
+}
+
+/** How many stories a listing page renders before it needs a cursor. */
+const PAGE = 40
 
 export async function getCategories(): Promise<Category[]> {
-  return categories
+  return read('getCategories', [], (handle) => listCategories(handle))
 }
 
 export async function getCategory(slug: string): Promise<Category | undefined> {
-  return categories.find((c) => c.slug === slug)
+  return read('getCategory', undefined, (handle) => findCategory(handle, slug))
 }
 
 export async function getCities(): Promise<City[]> {
-  return cities
+  return read('getCities', [], (handle) => listCities(handle))
 }
 
 export async function getCity(slug: string): Promise<City | undefined> {
-  return cities.find((c) => c.slug === slug)
+  return read('getCity', undefined, (handle) => findCity(handle, slug))
 }
 
 export async function getReporter(slug: string): Promise<Reporter | undefined> {
-  return reporters.find((r) => r.slug === slug)
+  return read('getReporter', undefined, (handle) => findReporter(handle, slug))
 }
 
-export async function getArticles(): Promise<Article[]> {
-  return [...articles].sort(byNewest)
+/**
+ * The newest published stories.
+ *
+ * Bounded. The fixture version returned every article, which was fine for
+ * thirty rows and is the unbounded read the audit flagged for any real table.
+ */
+export async function getArticles(limit = PAGE): Promise<ArticleSummary[]> {
+  return read('getArticles', [], async (handle) => (await listPublished(handle, { limit })).items)
 }
 
 export async function getArticle(slug: string): Promise<Article | undefined> {
-  return articles.find((a) => a.slug === slug)
+  return read('getArticle', undefined, (handle) => findArticle(handle, slug))
 }
 
-export async function getArticlesByCategory(slug: string): Promise<Article[]> {
-  return articles.filter((a) => a.categorySlug === slug).sort(byNewest)
+export async function getArticlesByCategory(slug: string, limit = PAGE): Promise<ArticleSummary[]> {
+  return read(
+    'getArticlesByCategory',
+    [],
+    async (handle) => (await listPublished(handle, { categorySlug: slug, limit })).items,
+  )
 }
 
-export async function getArticlesByCity(slug: string): Promise<Article[]> {
-  return articles.filter((a) => a.citySlug === slug).sort(byNewest)
+export async function getArticlesByCity(slug: string, limit = PAGE): Promise<ArticleSummary[]> {
+  return read(
+    'getArticlesByCity',
+    [],
+    async (handle) => (await listPublished(handle, { citySlug: slug, limit })).items,
+  )
 }
 
-export async function getBreaking(): Promise<Article[]> {
-  // Explicit comparisons: these flags are `boolean | undefined`, so `??` would
-  // return `false` instead of falling through to `live`. See content.test.ts.
-  return articles.filter((a) => a.breaking === true || a.live === true).sort(byNewest)
+/** The ticker: breaking stories and live event hubs. */
+export async function getBreaking(limit = 12): Promise<ArticleSummary[]> {
+  return read(
+    'getBreaking',
+    [],
+    async (handle) => (await listPublished(handle, { urgentOnly: true, limit })).items,
+  )
 }
 
 /** The lead story for the homepage. */
-export async function getLead(): Promise<Article | undefined> {
-  return (await getArticles())[0]
+export async function getLead(): Promise<ArticleSummary | undefined> {
+  return read('getLead', undefined, (handle) => findLead(handle))
 }
 
 /** Stories related to `article`, preferring the same city, then category. */
-export async function getRelated(article: Article, limit = 3): Promise<Article[]> {
-  const pool = articles.filter((a) => a.slug !== article.slug)
-  const scored = pool
-    .map((a) => ({
-      a,
-      score: (a.citySlug === article.citySlug ? 2 : 0) + (a.categorySlug === article.categorySlug ? 1 : 0),
-    }))
-    .filter((s) => s.score > 0)
-    .sort((x, y) => y.score - x.score || byNewest(x.a, y.a))
-  return scored.slice(0, limit).map((s) => s.a)
+export async function getRelated(article: ArticleSummary, limit = 3): Promise<ArticleSummary[]> {
+  return read('getRelated', [], (handle) => findRelated(handle, article, limit))
 }
