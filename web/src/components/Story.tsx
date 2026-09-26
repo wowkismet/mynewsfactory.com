@@ -1,20 +1,21 @@
 import Link from 'next/link'
-import type { Article, Reporter } from '@/lib/types'
+import { Artwork } from './Artwork'
+import type { ArticleSummary, Reporter } from '@/lib/types'
 import { getReporter } from '@/lib/content'
 
 /** Compact relative time, e.g. "12 min ago", "3 h ago", "2 d ago". */
 export function timeAgo(iso: string, now: number = Date.UTC(2026, 8, 14, 18, 0, 0)): string {
   const mins = Math.max(1, Math.round((now - new Date(iso).getTime()) / 60000))
-  if (mins < 60) return `${mins} min ago`
+  if (mins < 60) return `${mins.toString()} min ago`
   const hours = Math.round(mins / 60)
-  if (hours < 24) return `${hours} h ago`
-  return `${Math.round(hours / 24)} d ago`
+  if (hours < 24) return `${hours.toString()} h ago`
+  return `${Math.round(hours / 24).toString()} d ago`
 }
 
 export function views(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M views`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K views`
-  return `${n} views`
+  return `${n.toString()} views`
 }
 
 export function Byline({ reporter }: { reporter: Reporter }) {
@@ -26,13 +27,13 @@ export function Byline({ reporter }: { reporter: Reporter }) {
   )
 }
 
-export async function HeroStory({ article }: { article: Article }) {
+export async function HeroStory({ article }: { article: ArticleSummary }) {
   const reporter = await getReporter(article.reporterSlug)
   return (
     <article className="hero">
       <div className="figure">
         <span className="flag badge">{article.live ? 'Live' : 'Breaking news'}</span>
-        <span className="ph lbl">Hero image 16:9</span>
+        <Artwork seed={article.slug} category={article.categorySlug} ratio="16:9" alt="" />
       </div>
       <div className="body">
         <div className="lbl" style={{ color: 'var(--red)' }}>{article.kicker}</div>
@@ -50,11 +51,13 @@ export async function HeroStory({ article }: { article: Article }) {
   )
 }
 
-export async function StoryCard({ article }: { article: Article }) {
+export async function StoryCard({ article }: { article: ArticleSummary }) {
   const reporter = await getReporter(article.reporterSlug)
   return (
     <article className="card">
-      <div className="figure lbl">Image 16:9</div>
+      <div className="figure">
+        <Artwork seed={article.slug} category={article.categorySlug} ratio="16:9" alt="" />
+      </div>
       <div className="body">
         <div className="lbl" style={{ color: 'var(--red)' }}>{article.kicker}</div>
         <h3><Link href={`/news/${article.slug}`}>{article.title}</Link></h3>
@@ -68,10 +71,12 @@ export async function StoryCard({ article }: { article: Article }) {
   )
 }
 
-export function RailItem({ article }: { article: Article }) {
+export function RailItem({ article }: { article: ArticleSummary }) {
   return (
     <Link className="item" href={`/news/${article.slug}`}>
-      <span className="thumb" aria-hidden="true" />
+      <span className="thumb">
+        <Artwork seed={article.slug} category={article.categorySlug} ratio="1:1" alt="" />
+      </span>
       <span>
         <h4>{article.title}</h4>
         <span className="m meta">{views(article.views)} · {timeAgo(article.publishedAt)}</span>

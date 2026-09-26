@@ -1,0 +1,11 @@
+# Environment files hold real credentials. Only web/.env.example is committed
+# (§51). The deployment checkout on the VPS keeps its .env in this directory,
+# so an untracked-file mistake here would publish the database password.
+.env
+.env.*
+!.env.example
+
+# Local state
+node_modules/
+.next/
+*.log

@@ -5,6 +5,49 @@
 # rareminting.com runs on 3000 and must stay untouched.
 
 services:
+  # PostgreSQL is reachable only on the compose network. No host port is
+  # published: nothing outside these containers needs to reach the database,
+  # and the server is shared with another production site.
+  db:
+    image: postgres:17-alpine
+    container_name: mynewsfactory-db
+    restart: unless-stopped
+
+    # No longer opt-in. The portal reads the database on every page, so a
+    # `docker compose up -d` that skipped PostgreSQL would start a site that
+    # can only render its empty state.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mynewsfactory}
+      POSTGRES_USER: ${POSTGRES_USER:-mynewsfactory}
+      # No default. The postgres image refuses to initialise without a
+      # password and says so plainly, so an empty value fails loudly at
+      # startup rather than silently creating a guessable database.
+      # Compose interpolates the whole file regardless of profiles, so this
+      # cannot use the `:?` form without breaking deploys that never start
+      # the database.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      # scram-sha-256 for any new connection, including from the host.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-mynewsfactory} -d $${POSTGRES_DB:-mynewsfactory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   web:
     build:
       context: .
@@ -19,6 +62,25 @@ services:
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://mynewsfactory.com}
+
+      # sslmode=disable is correct here and only here: the connection never
+      # leaves the compose network, and pool.ts requires TLS for anything else
+      # (web/src/lib/db/pool.ts).
+      DATABASE_URL: >-
+        postgres://${POSTGRES_USER:-mynewsfactory}:${POSTGRES_PASSWORD:-}@db:5432/${POSTGRES_DB:-mynewsfactory}?sslmode=disable
+
+      # Both come from .env, which deploy/provision-env.sh writes mode-600 on
+      # the server. They are never defaulted: a missing pepper must fail loudly
+      # at startup, not silently hash everything with an empty string.
+      AUTH_TOKEN_PEPPER: ${AUTH_TOKEN_PEPPER:-}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+
+    # The app fails its own health check without a database, so starting it
+    # before PostgreSQL is ready just means a restart loop at every deploy.
+    depends_on:
+      db:
+        condition: service_healthy
 
     # --- hardening ---
     security_opt:
@@ -33,3 +95,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  db-data:

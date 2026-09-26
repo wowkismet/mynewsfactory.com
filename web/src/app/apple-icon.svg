@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-label="My News Factory">
+  <rect width="180" height="180" fill="#17140f"/>
+  <rect x="16" y="16" width="148" height="148" fill="none" stroke="#c0392b" stroke-width="8"/>
+  <text x="90" y="120"
+        font-family="Georgia, 'Times New Roman', serif"
+        font-size="86" font-weight="700" fill="#f3efe8"
+        text-anchor="middle" letter-spacing="-3">M</text>
+</svg>

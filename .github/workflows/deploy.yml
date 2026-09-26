@@ -1,0 +1,191 @@
+name: Deploy to VPS
+
+# Rebuilds the container on the VPS and migrates the database. Manual, or
+# automatically when anything affecting the running image changes on main.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'deploy/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy.yml'
+
+# Least privilege: the job only reads the repository.
+permissions:
+  contents: read
+
+# Never let two deploys touch the server at once.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  # The IP, not srv1936995.hstgr.cloud. The hostname resolves to IPv6 while the
+  # site's A record is this address, and VPS_KNOWN_HOSTS pins whatever string
+  # is used here -- a mismatch fails host verification rather than falling
+  # back, which is the correct behaviour and an avoidable way to break a
+  # deploy. Regenerate the secret with:
+  #   ssh-keyscan -t ed25519 200.234.42.251
+  VPS_HOST: 200.234.42.251
+  VPS_USER: root
+  APP_DIR: /srv/mynewsfactory
+  APP_PORT: '3100'
+
+jobs:
+  # An earlier version of this workflow failed outright when the SSH secret was
+  # absent, which painted every commit red for weeks and taught everyone to
+  # ignore the deploy status. Whether the credentials exist is a fact about the
+  # repository, not a fault in the commit, so it is reported and the job is
+  # skipped instead.
+  credentials:
+    name: Check deploy credentials
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          if [ -n "$SSH_KEY" ] && [ -n "$KNOWN_HOSTS" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deploy skipped — credentials not configured"
+            echo
+            echo "Add both repository secrets under **Settings → Secrets and variables → Actions**:"
+            echo
+            echo '| Secret | What it is |'
+            echo '| --- | --- |'
+            echo '| `VPS_SSH_KEY` | The private key whose public half is in `/root/.ssh/authorized_keys` on the VPS. |'
+            echo '| `VPS_KNOWN_HOSTS` | Output of `ssh-keyscan -t ed25519 '"${VPS_HOST}"'`, so the host identity is pinned. |'
+            echo
+            echo "Then re-run this workflow. Nothing was deployed."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Deploy skipped: VPS_SSH_KEY and/or VPS_KNOWN_HOSTS are not set."
+
+  deploy:
+    name: Build, deploy, migrate, verify
+    needs: credentials
+    if: needs.credentials.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # Fail here rather than on the server: a broken build must never reach
+      # the VPS, where a failed `docker compose up` can leave the site down.
+      - name: Verify the app builds
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Host identity is pinned. Never StrictHostKeyChecking=no.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      # rareminting.com shares this server on port 3000. Record its health now
+      # so the final step can prove the deploy did not disturb it.
+      - name: Record rareminting health before deploying
+        id: before
+        run: |
+          code=$(ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
+            "curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: rareminting.com' http://127.0.0.1 || echo 000")
+          echo "rareminting before: $code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Pull, rebuild and migrate
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" bash -s <<'REMOTE'
+            set -euo pipefail
+            cd /srv/mynewsfactory
+
+            git fetch --depth 1 origin main
+            git reset --hard origin/main
+            git --no-pager log --oneline -1
+
+            # Fills in any missing key; never regenerates an existing one.
+            bash deploy/provision-env.sh
+
+            # Only this project's compose stack is touched. The container
+            # publishes 127.0.0.1:3100 only, so nothing else on the host moves.
+            docker compose up -d --build
+
+            # Schema first, then the reference data every environment needs.
+            # Never `db:seed` here: that installs invented reporters and
+            # invented articles, and this is a live news site (D-010, D-026).
+            docker compose exec -T web npm run db:migrate
+            docker compose exec -T web npm run db:bootstrap
+
+            # Keep the disk from filling with superseded layers.
+            docker image prune -f >/dev/null 2>&1 || true
+          REMOTE
+
+      - name: Verify the deploy
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" bash -s <<'REMOTE'
+            set -euo pipefail
+            cd /srv/mynewsfactory
+
+            # Give the container a moment to finish starting.
+            for _ in $(seq 1 20); do
+              app=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3100 || echo 000)
+              [ "$app" = "200" ] && break
+              sleep 3
+            done
+
+            site=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: mynewsfactory.com' http://127.0.0.1 || echo 000)
+            health=$(curl -sS --max-time 10 http://127.0.0.1:3100/api/v1/health || echo '{}')
+
+            echo "container 127.0.0.1:3100 -> $app"
+            echo "site via nginx          -> $site"
+            echo "health                  -> $health"
+
+            docker compose ps
+
+            [ "$app" = "200" ]  || { echo "the container is not serving"; docker compose logs --tail 60 web; exit 1; }
+            [ "$site" = "200" ] || { echo "nginx is not proxying to the container"; exit 1; }
+
+            # A site that answers while its database does not is the failure
+            # this check exists for: every page would render its empty state
+            # and the deploy would otherwise look successful.
+            case "$health" in
+              *'"database":"up"'*) ;;
+              *) echo "the app is up but the database is not reachable from it"; exit 1 ;;
+            esac
+          REMOTE
+
+      # A deploy that silently breaks the neighbouring site is a failed deploy.
+      - name: Confirm rareminting is unaffected
+        run: |
+          after=$(ssh -i ~/.ssh/deploy_key -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" \
+            "curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: rareminting.com' http://127.0.0.1 || echo 000")
+          before='${{ steps.before.outputs.code }}'
+          echo "rareminting before=$before after=$after"
+          if [ "$before" = "200" ] && [ "$after" != "200" ]; then
+            echo "::error::rareminting.com was healthy before this deploy and is not now. Investigate immediately."
+            exit 1
+          fi
+
+      - name: Remove the SSH key from the runner
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

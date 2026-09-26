@@ -11,7 +11,10 @@ This repository currently contains **Phase 1 — the public portal front end**.
 | `web/` | Next.js 16 + TypeScript portal (App Router, React 19) |
 | `web/src/app` | Routes: home, article, category, city |
 | `web/src/components` | Masthead, navigation, ticker, story cards, panels |
-| `web/src/lib/content.ts` | Editorial data source — swap for PostgreSQL in Phase 2 |
+| `web/src/lib/db/` | PostgreSQL access: migrations runner, repository, cursors, seed, identity |
+| `web/src/lib/auth/` | Password hashing, tokens, TOTP, recovery codes, RBAC |
+| `web/migrations/` | Schema migrations, each with a rollback |
+| `web/src/lib/content.ts` | Fixture accessors the pages still use; the repository replaces them next |
 | `web/src/lib/pricing.ts` | Central pricing configuration — no price is hard-coded |
 
 ## Routes
@@ -32,8 +35,34 @@ npm run dev          # http://localhost:3000
 ```bash
 npm run build        # production build
 npm run start        # serve the build
+npm run lint         # eslint, type-aware
 npm run typecheck    # tsc --noEmit
+npm run test         # vitest
+npm run verify       # everything CI runs, in CI's order
 ```
+
+```bash
+docker compose --profile db up -d db   # opt-in; the pages still read fixtures
+cd web && npm run db:migrate && npm run db:seed
+```
+
+## Documentation
+
+Engineering documentation lives in `docs/`:
+
+| Document | Contents |
+| --- | --- |
+| `ARCHITECTURE_AUDIT.md` | What this repository actually contains, measured |
+| `IMPLEMENTATION_PLAN.md` | Phased plan from here to the full platform |
+| `THREAT_MODEL.md` | Assets, actors, threats, mitigations, acceptance gate |
+| `DECISIONS.md` | Engineering decisions, with reasons and alternatives |
+| `TESTING.md` | Test strategy, current coverage, per-phase requirements |
+| `DATABASE.md` | Schema, access layer, migrations, seeding, operations |
+| `AUTHENTICATION.md` | Credentials, sessions, MFA, brute-force controls |
+| `RBAC.md` | Roles, permissions, scoped grants, audit |
+
+Read `ARCHITECTURE_AUDIT.md` first. It is candid about the gap between this
+repository and the full specification.
 
 ## Design system
 
@@ -58,12 +87,30 @@ and success story bookings ₹10,000 plus applicable taxes.
   `Referrer-Policy` and `Permissions-Policy` set in `web/next.config.mjs`
 - `poweredByHeader` disabled
 - No `dangerouslySetInnerHTML` anywhere; article bodies render as escaped text
-- `npm audit` reports 0 vulnerabilities at the time of commit
+- `npm audit` reports 0 vulnerabilities, including dev dependencies
+- Type-aware ESLint bans `dangerouslySetInnerHTML`, `innerHTML`, `eval` and
+  dynamic `Function` construction outright
+- CI verifies every push: lint, typecheck, test, build, dependency audit, and a
+  container build that must serve a request before the job passes
 
 ## Deploying
 
 The portal runs as a Docker container on the VPS, published on the host's
-loopback at port 3100. nginx proxies `mynewsfactory.com` to it.
+loopback at port 3100. nginx proxies `mynewsfactory.com` and
+`www.mynewsfactory.com` to it over HTTPS.
+
+Deploy from the console, which uses this repository's compose file:
+
+```bash
+cd /srv/mynewsfactory
+git fetch origin <branch> && git checkout FETCH_HEAD -- .
+docker compose up -d --build
+```
+
+Do not deploy this project through Hostinger's Docker Manager as well. It
+stores its own copy of the compose file rather than reading this one, so the
+two drift apart, and both define `container_name: mynewsfactory` — they would
+compete for the same name and the same port.
 
 To deploy an update:
 
@@ -71,6 +118,13 @@ To deploy an update:
 cd /srv/mynewsfactory
 git pull
 docker compose up -d --build
+```
+
+This starts the portal only. PostgreSQL is behind the `db` profile until the
+pages read it:
+
+```bash
+docker compose --profile db up -d
 ```
 
 The container listens on 3000 inside its own network namespace and is reachable

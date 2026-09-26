@@ -1,8 +1,10 @@
 import Link from 'next/link'
-import { getCities } from '@/lib/content'
+import { getArticles, getCategories, getCities, getReporter } from '@/lib/content'
 import { money, moneyRange, pricing } from '@/lib/pricing'
+import { Artwork } from './Artwork'
+import { timeAgo, views } from './Story'
 
-const SIDE_LINKS: Array<{ label: string; href: string; note?: string; air?: boolean }> = [
+const SIDE_LINKS: { label: string; href: string; note?: string; air?: boolean }[] = [
   { label: 'Home', href: '/' },
   { label: 'Live TV', href: '/category/breaking', note: 'On air', air: true },
   { label: 'Videos', href: '/category/technology' },
@@ -28,6 +30,52 @@ export function SideNav({ current = '/' }: { current?: string }) {
   )
 }
 
+/**
+ * The left column's second module.
+ *
+ * The four columns used to end at very different heights -- the main column ran
+ * 715px while the rails stopped between 430 and 477, leaving a band of empty
+ * page across three quarters of the width. The fix is content, not a stretched
+ * container: each column carries enough to reach the fold.
+ */
+export async function TrendingList() {
+  const articles = await getArticles()
+  const trending = [...articles].sort((a, b) => b.views - a.views).slice(0, 6)
+
+  return (
+    <section className="col-mod">
+      <div className="lbl k">Most read today</div>
+      <ol className="ranked">
+        {trending.map((article, index) => (
+          <li key={article.slug}>
+            <span className="rank">{(index + 1).toString().padStart(2, '0')}</span>
+            <Link href={`/news/${article.slug}`}>
+              <span className="t">{article.title}</span>
+              <span className="meta">{views(article.views)}</span>
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+/** Section index, filling the left column below the trending list. */
+export async function SectionIndex() {
+  const categories = await getCategories()
+
+  return (
+    <section className="band sections">
+      <div className="lbl k">Browse every section</div>
+      <div className="chips">
+        {categories.map((c) => (
+          <Link key={c.slug} className="chip" href={`/category/${c.slug}`}>{c.name}</Link>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export function LiveWorld() {
   return (
     <aside className="world">
@@ -48,10 +96,43 @@ export function LiveWorld() {
       </div>
       <p className="say">One planet. One news. One community.</p>
       <div className="ad">
-        <div className="lbl k">Sponsored</div>
-        <div className="slot lbl">Ad creative 300×250</div>
+        <div className="lbl k">Advertise here</div>
+        <Link className="slot promo" href="#advertise">
+          <Artwork seed="advertise-house-slot" category="business" ratio="4:3" alt="" />
+          <span className="over">
+            <span className="lbl">Reach readers in every city</span>
+            <span className="cta">{moneyRange(pricing.advertisingPerDayMin, pricing.advertisingPerDayMax)} per day</span>
+          </span>
+        </Link>
       </div>
     </aside>
+  )
+}
+
+/** Live city desks, below the Live World panel. */
+export async function CityDesks() {
+  const [cities, articles] = await Promise.all([getCities(), getArticles()])
+
+  return (
+    <section className="col-mod">
+      <div className="lbl k">City desks</div>
+      <ul className="desks">
+        {cities.map((city) => {
+          const count = articles.filter((a) => a.citySlug === city.slug).length
+          const latest = articles.find((a) => a.citySlug === city.slug)
+          return (
+            <li key={city.slug}>
+              <Link href={`/city/${city.slug}`}>
+                <span className="t">{city.newsroom}</span>
+                <span className="meta">
+                  {count.toString()} live · {latest ? timeAgo(latest.publishedAt) : 'standing by'}
+                </span>
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
@@ -104,7 +185,7 @@ export function QuickPoll() {
             <span className="meta">{o.pct}%</span>
           </div>
           <div className="track2">
-            <div className="fill" style={{ width: `${o.pct}%` }} />
+            <div className="fill" style={{ width: `${o.pct.toString()}%` }} />
           </div>
         </div>
       ))}
@@ -173,6 +254,32 @@ export async function CityStrip() {
           </Link>
         ))}
       </div>
+    </section>
+  )
+}
+
+/** Reporters currently filing, below the city desks. */
+export async function ReportersOnDuty() {
+  const articles = await getArticles()
+  // Most recently published first, de-duplicated: who is actually filing now.
+  const slugs = [...new Set(articles.map((a) => a.reporterSlug))].slice(0, 3)
+  const people = await Promise.all(slugs.map(async (slug) => getReporter(slug)))
+
+  return (
+    <section className="col-mod">
+      <div className="lbl k">Reporters on duty</div>
+      <ul className="duty">
+        {people.filter((r) => r !== undefined).map((r) => (
+          <li key={r.slug}>
+            <span className="av" aria-hidden="true">{r.name.slice(0, 1)}</span>
+            <span className="who">
+              <span className="t">{r.name}</span>
+              <span className="meta">{r.tier} · {r.city}</span>
+            </span>
+            {r.verified ? <span className="tick lbl">Verified</span> : null}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

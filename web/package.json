@@ -6,18 +6,35 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "db:migrate": "node --import ./scripts/register.mjs scripts/db.ts migrate",
+    "db:bootstrap": "node --import ./scripts/register.mjs scripts/db.ts bootstrap",
+    "db:seed": "node --import ./scripts/register.mjs scripts/db.ts seed",
+    "layout:check": "node scripts/layout-check.mjs"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.1",
     "next": "^16.3.5",
+    "pg": "^8.23.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@types/node": "22.10.5",
+    "@electric-sql/pglite": "^0.5.8",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "typescript": "5.7.3"
+    "eslint": "^10.11.0",
+    "globals": "^16.5.0",
+    "playwright": "^1.63.0",
+    "typescript": "5.7.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
   }
 }
