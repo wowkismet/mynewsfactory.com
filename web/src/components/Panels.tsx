@@ -1,32 +1,92 @@
 import Link from 'next/link'
 import { getArticles, getCategories, getCities, getReporter } from '@/lib/content'
 import { money, moneyRange, pricing } from '@/lib/pricing'
+import { platformSummary } from '@/lib/db/newsroom'
+import { db } from '@/lib/db/pool'
 import { Artwork } from './Artwork'
 import { timeAgo, views } from './Story'
 
-const SIDE_LINKS: { label: string; href: string; note?: string; air?: boolean }[] = [
+/**
+ * The portal sidebar from the 4.0 design.
+ *
+ * `note` used to carry invented counts -- "12" polls, "8 paid" surveys, an
+ * "On air" channel. None of those tables exists, so the numbers were decoration
+ * that read as fact. A section with nothing behind it now says "soon" and links
+ * to nothing, because a link to an anchor that is not on the page is a dead end
+ * dressed up as navigation.
+ */
+interface SideLink {
+  label: string
+  /** Omitted while the section has no page to go to. */
+  href?: string
+}
+
+const SIDE_LINKS: SideLink[] = [
   { label: 'Home', href: '/' },
-  { label: 'Live TV', href: '/category/breaking', note: 'On air', air: true },
-  { label: 'Videos', href: '/category/technology' },
   { label: 'News', href: '/category/breaking' },
-  { label: 'Polls', href: '#polls', note: '12' },
-  { label: 'Surveys', href: '#surveys', note: '8 paid' },
-  { label: 'Interviews', href: '#interview' },
-  { label: 'Success Stories', href: '#story' },
-  { label: 'Biographies', href: '#biography' },
+  { label: 'Breaking', href: '/category/breaking' },
   { label: 'My City', href: '/city/mumbai' },
+  { label: 'Search', href: '/search' },
+  { label: 'Live TV' },
+  { label: 'Videos' },
+  { label: 'Polls' },
+  { label: 'Surveys' },
+  { label: 'Interviews' },
+  { label: 'Success Stories' },
+  { label: 'Biographies' },
+  { label: 'Rewards' },
+  { label: 'Wallet' },
+]
+
+/** What a person can actually start doing, and what they cannot yet. */
+const SERVICES: SideLink[] = [
+  { label: 'Report now', href: '/desk' },
+  { label: 'Become a reporter', href: '/register' },
+  { label: 'Your account', href: '/dashboard' },
+  { label: 'Book an interview' },
+  { label: 'Book a story' },
+  { label: 'Book a biography' },
+  { label: 'Post an assignment' },
 ]
 
 export function SideNav({ current = '/' }: { current?: string }) {
   return (
-    <nav className="sidenav" aria-label="Portal sections">
-      {SIDE_LINKS.map((l) => (
-        <Link key={l.label} href={l.href} className={l.href === current ? 'on' : undefined}>
-          <span>{l.label}</span>
-          {l.note ? <span className={`n${l.air ? ' air' : ''}`}>{l.note}</span> : null}
-        </Link>
-      ))}
-    </nav>
+    <>
+      <nav className="sidenav" aria-label="Portal sections">
+        <div className="navlist">
+          {SIDE_LINKS.map((l) =>
+            l.href === undefined ? (
+              <span key={l.label} aria-disabled="true" title="Not built yet">
+                <span style={{ color: 'var(--ink4)' }}>{l.label}</span>
+                <span className="n">soon</span>
+              </span>
+            ) : (
+              <Link key={l.label} href={l.href} className={l.href === current ? 'on' : undefined}>
+                <span>{l.label}</span>
+              </Link>
+            ),
+          )}
+        </div>
+      </nav>
+
+      <nav className="sidenav services" aria-label="My services">
+        <div className="rule-head"><h2>My services</h2></div>
+        {SERVICES.map((l) =>
+          l.href === undefined ? (
+            <span key={l.label} aria-disabled="true" title="Not built yet">
+              <span className="dot" style={{ background: 'var(--ink4)' }} aria-hidden="true" />
+              <span style={{ color: 'var(--ink4)' }}>{l.label}</span>
+              <span className="soon">soon</span>
+            </span>
+          ) : (
+            <Link key={l.label} href={l.href}>
+              <span className="dot" aria-hidden="true" />
+              <span>{l.label}</span>
+            </Link>
+          ),
+        )}
+      </nav>
+    </>
   )
 }
 
@@ -76,24 +136,60 @@ export async function SectionIndex() {
   )
 }
 
-export function LiveWorld() {
+/**
+ * The Live World panel.
+ *
+ * The design fills it with 195+ countries, 5,482 live stories and 1.2M users
+ * online. Every one of those is a number this platform does not have, and a
+ * visitor cannot tell an aspiration from a measurement -- so each is counted
+ * instead. They are small, and small is fine. Invented is not.
+ *
+ * "Users online" is live sessions: accounts with an unexpired, unrevoked
+ * session right now. That is a real definition of the phrase, unlike a figure
+ * chosen because it looks impressive.
+ */
+export async function LiveWorld() {
+  let countries = 0
+  let published = 0
+  let online = 0
+  let reachable = true
+
+  try {
+    const handle = db()
+    const [summary, countryRows] = await Promise.all([
+      platformSummary(handle),
+      handle.query<{ n: string }>('SELECT count(*)::text AS n FROM countries WHERE active'),
+    ])
+    countries = Number(countryRows.rows[0]?.n ?? '0')
+    published = summary.published
+    online = summary.liveSessions
+  } catch {
+    reachable = false
+  }
+
   return (
     <aside className="world">
       <div className="lbl k">Live world</div>
-      <div className="stats">
-        <div className="stat">
-          <div className="lbl k">Countries</div>
-          <div className="v">195+</div>
+      {reachable ? (
+        <div className="stats">
+          <div className="stat">
+            <div className="lbl k">Countries</div>
+            <div className="v">{countries.toLocaleString('en')}</div>
+          </div>
+          <div className="stat">
+            <div className="lbl k">Published stories</div>
+            <div className="v">{published.toLocaleString('en')}</div>
+          </div>
+          <div className="stat wide">
+            <div className="lbl k">Readers signed in now</div>
+            <div className="v">{online.toLocaleString('en')}</div>
+          </div>
         </div>
-        <div className="stat">
-          <div className="lbl k">Live news</div>
-          <div className="v">5,482</div>
-        </div>
-        <div className="stat wide">
-          <div className="lbl k">Users online</div>
-          <div className="v">1.2M</div>
-        </div>
-      </div>
+      ) : (
+        <p className="meta" style={{ marginTop: 10 }}>
+          The newsroom database did not answer, so there is nothing to count.
+        </p>
+      )}
       <p className="say">One planet. One news. One community.</p>
       <div className="ad">
         <div className="lbl k">Advertise here</div>
@@ -162,45 +258,51 @@ export function Marketplace() {
   )
 }
 
-const POLL_OPTIONS = [
-  { label: 'AI & machine learning', pct: 42 },
-  { label: 'Clean energy', pct: 28 },
-  { label: 'Space technology', pct: 15 },
-  { label: 'Biotechnology', pct: 10 },
-  { label: 'Other', pct: 5 },
-]
-
+/**
+ * The Quick Poll slot.
+ *
+ * It used to render five options with percentages summing to 100 and a total
+ * vote count, none of which came from anywhere. A poll result is a claim about
+ * what people think; fabricating one is not a placeholder, it is a fake
+ * finding. There are no polls, surveys or reward-coin tables, so the panel
+ * holds its place and says what it is waiting for.
+ */
 export function QuickPoll() {
   return (
     <section className="poll" id="polls">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-        <span className="lbl">Quick poll</span>
-        <span className="lbl coins">+25 coins</span>
+      <div className="rule-head" style={{ margin: '-16px -16px 0' }}>
+        <h3>Quick poll</h3>
       </div>
-      <h3>Which technology will have the biggest impact in the next five years?</h3>
-      {POLL_OPTIONS.map((o) => (
-        <div className="opt" key={o.label}>
-          <div className="optrow">
-            <span>{o.label}</span>
-            <span className="meta">{o.pct}%</span>
-          </div>
-          <div className="track2">
-            <div className="fill" style={{ width: `${o.pct.toString()}%` }} />
-          </div>
-        </div>
-      ))}
-      <a className="btn" href="#vote" style={{ marginTop: 6 }}>Vote now</a>
+      <div className="pending">
+        <p style={{ margin: 0 }}>
+          Polls, surveys and the reward coins they pay are Phase&nbsp;6.
+        </p>
+        <p className="why" style={{ margin: 0 }}>
+          There are no poll, response or wallet tables yet. A result shown here
+          before they exist would be an invented finding, not a placeholder.
+        </p>
+      </div>
     </section>
   )
 }
 
+/**
+ * The weather slot.
+ *
+ * A fixed "Mumbai 28° partly cloudy" is wrong somewhere between one and four
+ * times a day, and a reader has no way to know which. Weather needs a feed;
+ * until there is one the panel says so.
+ */
 export function Weather() {
   return (
     <aside className="weather">
       <div className="lbl" style={{ opacity: 0.75 }}>My city weather</div>
-      <div style={{ fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 600, marginTop: 6 }}>Mumbai</div>
-      <div className="t" style={{ marginTop: 8 }}>28°</div>
-      <div className="lbl" style={{ opacity: 0.75, marginTop: 6 }}>Partly cloudy</div>
+      <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--ink3)', lineHeight: 1.5 }}>
+        Not connected to a weather service yet.
+      </p>
+      <p className="meta" style={{ marginTop: 8 }}>
+        A fixed temperature would be wrong most of the day.
+      </p>
     </aside>
   )
 }

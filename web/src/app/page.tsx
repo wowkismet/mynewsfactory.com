@@ -109,7 +109,7 @@ export default async function HomePage() {
 
       <SectionIndex />
 
-      <Marketplace />
+      <div id="marketplace"><Marketplace /></div>
 
       <section className="band">
         <div className="grid4" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>

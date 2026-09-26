@@ -2,6 +2,8 @@ import Link from 'next/link'
 import Clock from './Clock'
 import SignOutButton from './auth/SignOutButton'
 import { currentViewer } from '@/lib/auth/session-server'
+import { platformSummary } from '@/lib/db/newsroom'
+import { db } from '@/lib/db/pool'
 import { getCategories } from '@/lib/content'
 import { money, pricing } from '@/lib/pricing'
 
@@ -66,8 +68,12 @@ export function Masthead() {
     <header className="masthead">
       <div className="shell">
         <div className="brand">
-          <h1><Link href="/">MY NEWS FACTORY</Link></h1>
-          <div className="tag lbl">People-powered global news · media · research · rewards</div>
+          <h1>
+            <Link href="/">
+              MY NEWS FACTORY <span className="ver">4.0</span>
+            </Link>
+          </h1>
+          <div className="tag">News by the people. News for the people.</div>
         </div>
 
         <Clock />
@@ -76,14 +82,14 @@ export function Masthead() {
           <form className="searchbox" role="search" action="/search">
             <span className="meta" aria-hidden="true">⌕</span>
             <label className="skip" htmlFor="q">Search</label>
-            <input id="q" name="q" type="search" placeholder="Search news, cities, reporters" />
+            <input id="q" name="q" type="search" placeholder="Search news, topics, people, cities…" />
           </form>
           <div className="mast-btns">
             {/* Both pointed at anchors that did not exist. Reporter submission
                 and the academy are Phase 3; until then the honest destination
                 for both is the account that either one starts from. */}
-            <Link className="btn btn--red" href="/register">Report now</Link>
-            <Link className="btn" href="/register">Become a reporter</Link>
+            <Link className="btn btn--red" href="/register">Become a reporter</Link>
+            <Link className="btn" href="/desk">Report now</Link>
           </div>
         </div>
       </div>
@@ -105,9 +111,14 @@ export async function MainNav() {
           <li><Link href="/category/breaking">More ▾</Link></li>
         </ul>
         <div className="book">
-          <a className="b1" href="#advertise">Advertise</a>
-          <a className="b2" href="#interview">Book interview</a>
-          <a className="b3" href="#story">Book story</a>
+          {/* The four commercial actions from the 4.0 design. None has a
+              booking flow behind it yet, so each goes to the marketplace
+              section that explains the rates rather than to a form that
+              cannot submit. */}
+          <a className="b1" href="/#marketplace">Advertise</a>
+          <a className="b2" href="/#marketplace">Book interview</a>
+          <a className="b3" href="/#marketplace">Book story</a>
+          <a className="b3" href="/#marketplace">Book biography</a>
         </div>
       </div>
     </nav>
@@ -133,13 +144,61 @@ export function Ticker({ headlines }: { headlines: string[] }) {
   )
 }
 
+/**
+ * The statistics strip from the 4.0 design.
+ *
+ * The design shows "1M+ Active Readers", "50K+ Reporters", "10K+ Businesses".
+ * Those are the numbers a launched platform would like to have, and printing
+ * them today would be the §89 failure in its purest form -- a visitor has no
+ * way to tell an aspiration from a measurement.
+ *
+ * So the strip stays and the figures are counted. Small numbers are not
+ * embarrassing; invented ones are disqualifying. A count the database could
+ * not produce is omitted rather than guessed.
+ */
+async function FooterStats() {
+  let stats: { v: string; k: string }[]
+
+  try {
+    const summary = await platformSummary(db())
+    const { rows } = await db().query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM countries WHERE active",
+    )
+
+    stats = [
+      { v: summary.published.toLocaleString('en'), k: 'Published stories' },
+      { v: summary.reporters.toLocaleString('en'), k: 'Reporters' },
+      { v: summary.users.toLocaleString('en'), k: 'Registered accounts' },
+      { v: Number(rows[0]?.n ?? '0').toLocaleString('en'), k: 'Countries covered' },
+    ]
+  } catch {
+    // The database is unreachable. Showing the last numbers anyone remembers
+    // would be worse than showing none.
+    return null
+  }
+
+  return (
+    <div className="footstats">
+      {stats.map((s) => (
+        <div className="s" key={s.k}>
+          <div>
+            <div className="v">{s.v}</div>
+            <div className="k">{s.k}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function SiteFooter() {
   return (
     <footer className="sitefoot">
       <div className="shell">
+        <FooterStats />
         <div className="top">
           <div>
-            <h3>MY NEWS FACTORY</h3>
+            <h3>MY NEWS FACTORY 4.0</h3>
             <p className="strap">
               The world’s people-powered global news, media, research, advertising &amp; rewards network.
             </p>
@@ -152,11 +211,11 @@ export function SiteFooter() {
           <div>
             <div className="lbl" style={{ color: 'var(--ink4)', marginBottom: 12 }}>Participate</div>
             <ul>
-              <li><a href="#become">Become a reporter — {money(pricing.reporterTrainingFee)}</a></li>
-              <li><a href="#advertise">Advertise with us</a></li>
-              <li><a href="#interview">Book an interview</a></li>
-              <li><a href="#story">Book a success story</a></li>
-              <li><a href="#surveys">Surveys &amp; polls</a></li>
+              <li><Link href="/register">Become a reporter — {money(pricing.reporterTrainingFee)}</Link></li>
+              <li><Link href="/#marketplace">Advertise with us</Link></li>
+              <li><Link href="/#marketplace">Book an interview</Link></li>
+              <li><Link href="/#marketplace">Book a success story</Link></li>
+              <li><Link href="/search">Search the archive</Link></li>
             </ul>
           </div>
           <div>
@@ -171,7 +230,7 @@ export function SiteFooter() {
           </div>
         </div>
         <div className="bottom lbl">
-          <span>More stories · more people · a bigger world</span>
+          <span className="motto">More stories. More people. A bigger world.</span>
           <span>© {new Date().getFullYear()} My News Factory</span>
         </div>
       </div>
